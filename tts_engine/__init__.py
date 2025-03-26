@@ -9,6 +9,8 @@ This package contains the core components for audio generation:
 # Make key components available at package level
 from .inference import (
     generate_speech_from_api,
+    generate_tokens_from_api,
+    tokens_decoder,
     AVAILABLE_VOICES,
     DEFAULT_VOICE,
     list_available_voices
