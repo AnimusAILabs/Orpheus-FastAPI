@@ -829,11 +829,14 @@
 
       // WebSocket connection
       let ws = null;
-      let isStreaming = false;
+      let audioContext = null;
+      let audioQueue = [];
+      let isPlaying = false;
+      let isPaused = false;
       let pendingPrompt = null;
       const RUNPOD_WS_URL = 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio';
       
-      function connectWebSocket() {
+      async function connectWebSocket() {
           if (ws) {
               ws.close();
           }
