@@ -806,24 +806,35 @@
         updateStatus('Starting audio generation...');
       }
 
-      function handleAudioChunk(audioData) {
-        if (!isStreaming) {
-          // Create new audio context if needed
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const audioBuffer = new Float32Array(audioData);
+      async function handleAudioChunk(chunk) {
+        if (!audioContext) {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        try {
+          // Convert the chunk to an AudioBuffer
+          const audioBuffer = await audioContext.decodeAudioData(chunk.buffer);
           
-          // Create audio source
+          // Create a source node
           const source = audioContext.createBufferSource();
-          const buffer = audioContext.createBuffer(1, audioBuffer.length, 24000); // 24kHz sample rate
-          buffer.copyToChannel(audioBuffer, 0);
-          source.buffer = buffer;
+          source.buffer = audioBuffer;
           
-          // Connect to destination and play
+          // Connect to the audio context's destination
           source.connect(audioContext.destination);
+          
+          // Play the chunk
           source.start(0);
           
           // Update status
           updateStatus('Playing audio chunk...');
+          
+          // Wait for the chunk to finish playing
+          await new Promise(resolve => {
+            source.onended = resolve;
+          });
+        } catch (error) {
+          console.error('Error playing audio chunk:', error);
+          updateStatus('Error playing audio chunk');
         }
       }
 
@@ -864,13 +875,34 @@
               updateStatus('WebSocket error occurred');
           };
           
-          ws.onmessage = (event) => {
+          ws.onmessage = async (event) => {
               const data = JSON.parse(event.data);
-              if (data.type === 'audio') {
-                  handleAudioChunk(data.audio);
-              } else if (data.type === 'error') {
-                  console.error('Server error:', data.error);
-                  updateStatus('Error: ' + data.error);
+              console.log('Received message:', data);
+              
+              switch (data.type) {
+                  case 'start':
+                      updateStatus('Starting audio generation...');
+                      break;
+                  case 'audio_chunk':
+                      if (data.chunk) {
+                          try {
+                              // Convert hex string to Uint8Array
+                              const hexString = data.chunk;
+                              const bytes = new Uint8Array(hexString.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                              await handleAudioChunk(bytes);
+                          } catch (error) {
+                              console.error('Error processing audio chunk:', error);
+                              updateStatus('Error processing audio chunk');
+                          }
+                      }
+                      break;
+                  case 'generation_complete':
+                      updateStatus('Audio generation complete');
+                      break;
+                  case 'error':
+                      console.error('Server error:', data.error);
+                      updateStatus('Error: ' + data.error);
+                      break;
               }
           };
       }
