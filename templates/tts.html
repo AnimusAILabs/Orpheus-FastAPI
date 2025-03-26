@@ -323,6 +323,10 @@
     document.addEventListener('DOMContentLoaded', function() {
       // Global variables
       let wavesurfer;
+      let ws = null;
+      let pendingPrompt = null;
+      let audioPlayer = null;  // Add global audio player variable
+      
       // Character counter
       const textArea = document.getElementById('text');
       const charCount = document.getElementById('char-count');
@@ -457,10 +461,6 @@
         wsUrl: 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio'  // RunPod WebSocket URL
       };
 
-      // WebSocket connection
-      let ws = null;
-      let pendingPrompt = null;
-
       function connectWebSocket() {
         if (ws) {
           ws.close();
@@ -517,36 +517,167 @@
         container.appendChild(template.content.cloneNode(true));
         
         // Initialize audio player
-        const player = new AudioStreamPlayer();
+        audioPlayer = new AudioStreamPlayer();  // Use global variable
         
-        // Send request
+        // Send request with only the parameters that exist in the form
         ws.send(JSON.stringify({
           text: text,
           voice: document.querySelector('input[name="voice"]:checked').value,
-          temperature: parseFloat(document.getElementById('temperature').value),
-          top_p: parseFloat(document.getElementById('top_p').value),
-          max_tokens: parseInt(document.getElementById('max_tokens').value)
+          model: document.getElementById('model').value,
+          speed: parseFloat(document.getElementById('speed').value)
         }));
+      }
+
+      let audioContext = null;
+      let nextPlayTime = 0;
+      let isPlaying = false;
+      let isBuffering = true;
+      let audioBuffers = new Map();
+      let currentContextId = 'default';
+      let processedDuration = 0;
+      let minBufferSize = 0.25;
+
+      // Initialize audio context
+      async function initAudio() {
+        if (!audioContext) {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 24000});
+          console.log('AudioContext initialized with sample rate:', audioContext.sampleRate);
+        }
       }
 
       function handleWebSocketMessage(event) {
         const data = JSON.parse(event.data);
-        if (data.type === 'audio_chunk') {
-          if (!player.audioContext) {
-            player.init().then(() => {
-              player.isPlaying = true;
-              player.processAudioChunk(data.audio);
+        console.log('Received WebSocket message:', data);
+        
+        if (data.type === 'audio') {
+          if (!audioContext) {
+            initAudio().then(() => {
+              isPlaying = true;
+              processAudioData(data.data);
             });
           } else {
-            player.processAudioChunk(data.audio);
+            processAudioData(data.data);
           }
         } else if (data.type === 'complete') {
+          console.log('Audio generation completed');
           updateStatus('Audio generation complete');
           document.getElementById('voice-name').textContent = data.voice;
+          const duration = Math.floor(processedDuration);
           document.getElementById('audio-duration').textContent = 
-            `${Math.floor(player.processedDuration / 60)}:${Math.floor(player.processedDuration % 60).toString().padStart(2, '0')}`;
+            `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}`;
         }
       }
+
+      function processAudioData(base64Data) {
+        try {
+          // Convert base64 to Uint8Array
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const chunk = bytes;
+          console.log('Processing audio chunk of size:', chunk.length);
+          
+          // Convert to float32
+          const floatData = new Float32Array(chunk.length / 2);
+          const view = new DataView(chunk.buffer);
+          for (let i = 0; i < floatData.length; i++) {
+            // Convert 16-bit PCM to float32 (-1.0 to 1.0)
+            const sample = view.getInt16(i * 2, true); // true for little-endian
+            floatData[i] = sample / 32768.0; // Normalize to [-1, 1] range
+          }
+          
+          if (isBuffering) {
+            if (!audioBuffers.has(currentContextId)) {
+              audioBuffers.set(currentContextId, []);
+            }
+            audioBuffers.get(currentContextId).push(floatData);
+            
+            // Check if we have enough buffer
+            const totalBufferedDuration = audioBuffers.get(currentContextId)
+              .reduce((acc, chunk) => acc + chunk.length / 24000, 0);
+              
+            if (totalBufferedDuration >= minBufferSize) {
+              isBuffering = false;
+              // Process all buffered chunks
+              const buffers = audioBuffers.get(currentContextId);
+              audioBuffers.set(currentContextId, []);
+              buffers.forEach(chunk => playChunk(chunk));
+            }
+          } else if (isPlaying) {
+            playChunk(floatData);
+          }
+        } catch (error) {
+          console.error('Error processing audio data:', error);
+        }
+      }
+
+      function playChunk(chunk) {
+        if (!audioContext || !isPlaying) return;
+
+        try {
+          // Create audio buffer with correct number of channels and sample rate
+          const buffer = audioContext.createBuffer(1, chunk.length, 24000);
+          buffer.copyToChannel(chunk, 0);
+          
+          const source = audioContext.createBufferSource();
+          source.buffer = buffer;
+          
+          // Add a small gain node to prevent clipping
+          const gainNode = audioContext.createGain();
+          gainNode.gain.value = 0.9; // Slightly reduce volume to prevent distortion
+          
+          source.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          const currentTime = audioContext.currentTime;
+          if (nextPlayTime < currentTime) {
+            nextPlayTime = currentTime;
+          }
+          
+          source.start(nextPlayTime);
+          nextPlayTime += chunk.length / 24000;
+          processedDuration += chunk.length / 24000;
+          
+          console.log('Playing chunk at:', nextPlayTime.toFixed(3), 'duration:', (chunk.length / 24000).toFixed(3));
+          
+          // Update progress bar
+          const progress = document.getElementById('audio-progress');
+          if (progress) {
+            progress.style.width = `${Math.min((processedDuration / 30) * 100, 100)}%`;
+          }
+        } catch (error) {
+          console.error('Error playing chunk:', error);
+        }
+      }
+
+      // Add pause/resume functionality
+      document.addEventListener('click', function(e) {
+        if (e.target.closest('#play-pause-btn')) {
+          if (!audioContext) return;
+          
+          if (isPlaying) {
+            audioContext.suspend();
+            isPlaying = false;
+            e.target.closest('#play-pause-btn').innerHTML = `
+              <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+              </svg>
+              Play
+            `;
+          } else {
+            audioContext.resume();
+            isPlaying = true;
+            e.target.closest('#play-pause-btn').innerHTML = `
+              <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 001 1h6a1 1 0 001-1V9a1 1 0 00-1-1H7z" clip-rule="evenodd" />
+              </svg>
+              Pause
+            `;
+          }
+        }
+      });
 
       // Initialize WebSocket connection
       connectWebSocket();
@@ -566,8 +697,11 @@
         this.isPlaying = false;
         this.nextPlayTime = 0;
         this.processedDuration = 0;
-        this.bufferSize = 0.25; // 250ms buffer
+        this.bufferSize = 1.5; // 250ms buffer
         this.sampleRate = 24000;
+        this.isBuffering = true;
+        this.minBufferSize = 1.5; // Minimum buffer size before starting playback
+        this.audioBuffers = [];
       }
 
       async init() {
@@ -575,18 +709,54 @@
           this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
             sampleRate: this.sampleRate
           });
+          console.log('AudioContext initialized with sample rate:', this.sampleRate);
+          // Start playback immediately
+          this.isPlaying = true;
+          this.nextPlayTime = this.audioContext.currentTime;
         }
       }
 
       processAudioChunk(chunk) {
+        if (!this.audioContext) return;
+
+        try {
+          // Convert 16-bit PCM to float32
+          const floatData = new Float32Array(chunk.length / 2);
+          const view = new DataView(chunk.buffer);
+          for (let i = 0; i < floatData.length; i++) {
+            // Convert 16-bit PCM to float32 (-1.0 to 1.0)
+            const sample = view.getInt16(i * 2, true);
+            floatData[i] = sample / 32768.0;
+          }
+          
+          if (this.isBuffering) {
+            this.audioBuffers.push(floatData);
+            console.log('Buffering audio, chunks:', this.audioBuffers.length);
+            
+            // Check if we have enough buffer to start playing
+            const totalBufferedDuration = this.audioBuffers.reduce((acc, chunk) => acc + chunk.length / this.sampleRate, 0);
+            if (totalBufferedDuration >= this.minBufferSize) {
+              this.isBuffering = false;
+              console.log('Buffer filled, starting playback...');
+              // Process all buffered chunks
+              while (this.audioBuffers.length > 0) {
+                this.playChunk(this.audioBuffers.shift());
+              }
+            }
+          } else if (this.isPlaying) {
+            this.playChunk(floatData);
+          }
+        } catch (error) {
+          console.error('Error processing audio chunk:', error);
+        }
+      }
+
+      playChunk(chunk) {
         if (!this.audioContext || !this.isPlaying) return;
 
         try {
-          // Convert hex string to Float32Array
-          const floatData = this.hexToFloat32Array(chunk);
-          
-          const buffer = this.audioContext.createBuffer(1, floatData.length, this.sampleRate);
-          buffer.copyToChannel(floatData, 0);
+          const buffer = this.audioContext.createBuffer(1, chunk.length, this.sampleRate);
+          buffer.copyToChannel(chunk, 0);
           
           const source = this.audioContext.createBufferSource();
           source.buffer = buffer;
@@ -598,8 +768,10 @@
           }
           
           source.start(this.nextPlayTime);
-          this.nextPlayTime += buffer.duration;
-          this.processedDuration += buffer.duration;
+          this.nextPlayTime += chunk.length / this.sampleRate;
+          this.processedDuration += chunk.length / this.sampleRate;
+          
+          console.log('Playing chunk at:', this.nextPlayTime, 'duration:', chunk.length / this.sampleRate);
           
           // Update progress bar
           const progress = document.getElementById('audio-progress');
@@ -607,32 +779,24 @@
             progress.style.width = `${Math.min((this.processedDuration / 30) * 100, 100)}%`;
           }
         } catch (error) {
-          console.error('Error processing audio chunk:', error);
+          console.error('Error playing chunk:', error);
         }
-      }
-
-      hexToFloat32Array(hexString) {
-        const bytes = new Uint8Array(hexString.length / 2);
-        for (let i = 0; i < hexString.length; i += 2) {
-          bytes[i / 2] = parseInt(hexString.substr(i, 2), 16);
-        }
-        
-        // Convert 16-bit PCM to float32
-        const floatData = new Float32Array(bytes.length / 2);
-        const view = new DataView(bytes.buffer);
-        for (let i = 0; i < floatData.length; i++) {
-          floatData[i] = view.getInt16(i * 2, true) / 32768.0;
-        }
-        return floatData;
       }
 
       togglePlayPause() {
+        if (!this.audioContext) return false;
+
         if (this.isPlaying) {
           this.audioContext.suspend();
           this.isPlaying = false;
         } else {
           this.audioContext.resume();
           this.isPlaying = true;
+          
+          // Process any queued chunks
+          while (this.audioQueue.length > 0) {
+            this.processAudioChunk(this.audioQueue.shift());
+          }
         }
         return this.isPlaying;
       }
@@ -644,34 +808,13 @@
           this.audioContext = null;
         }
         this.audioQueue = [];
+        this.audioBuffers = [];
         this.isPlaying = false;
         this.nextPlayTime = 0;
         this.processedDuration = 0;
+        this.isBuffering = true;
       }
     }
-
-    // Initialize the audio player
-    const audioPlayer = new AudioStreamPlayer();
-
-    // Add play/pause button handler
-    document.addEventListener('click', function(e) {
-      if (e.target.closest('#play-pause-btn')) {
-        const btn = e.target.closest('#play-pause-btn');
-        const isPlaying = audioPlayer.togglePlayPause();
-        
-        btn.innerHTML = isPlaying ? `
-          <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 001 1h6a1 1 0 001-1V9a1 1 0 00-1-1H7z" clip-rule="evenodd" />
-          </svg>
-          Pause
-        ` : `
-          <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
-          </svg>
-          Play
-        `;
-      }
-    });
   </script>
 </body>
 </html>
