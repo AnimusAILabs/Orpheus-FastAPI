@@ -233,86 +233,6 @@
                       </div>
                     </div>
                   </div>
-                  
-                  <!-- Server configuration section -->
-                  <div class="mt-6 border-t border-dark-700 pt-4">
-                    <h3 class="text-sm font-medium text-white mb-3">Server Configuration</h3>
-                    <p class="text-xs text-purple-300 mb-3">These settings will be saved to a <code class="bg-dark-700 px-1 rounded">.env</code> file. Restart the server to apply changes.</p>
-                    
-                    <!-- Form fields for all .env parameters -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <!-- Connection settings -->
-                      <div>
-                        <label for="api_url" class="block text-xs font-medium text-white mb-1">API URL</label>
-                        <input type="text" id="api_url" name="ORPHEUS_API_URL" 
-                               placeholder="http://127.0.0.1:1234/v1/completions" 
-                               class="block w-full rounded-md bg-dark-700 border-dark-600 text-white text-sm focus:border-primary-500 focus:ring-primary-500 focus:ring-offset-dark-800 px-3 py-2">
-                      </div>
-                      
-                      <div>
-                        <label for="api_timeout" class="block text-xs font-medium text-white mb-1">API Timeout (seconds)</label>
-                        <input type="number" id="api_timeout" name="ORPHEUS_API_TIMEOUT" min="10" max="1800" step="1"
-                               class="block w-full rounded-md bg-dark-700 border-dark-600 text-white text-sm focus:border-primary-500 focus:ring-primary-500 focus:ring-offset-dark-800 px-3 py-2">
-                      </div>
-                      
-                      <!-- Generation parameters -->
-                      <div>
-                        <label for="max_tokens" class="block text-xs font-medium text-white mb-1">Max Tokens</label>
-                        <input type="number" id="max_tokens" name="ORPHEUS_MAX_TOKENS" min="100" max="200000" step="1"
-                               class="block w-full rounded-md bg-dark-700 border-dark-600 text-white text-sm focus:border-primary-500 focus:ring-primary-500 focus:ring-offset-dark-800 px-3 py-2">
-                      </div>
-                      
-                      <div>
-                        <label for="temperature" class="block text-xs font-medium text-white mb-1">Temperature</label>
-                        <input type="number" id="temperature" name="ORPHEUS_TEMPERATURE" min="0.1" max="1.5" step="0.1"
-                               class="block w-full rounded-md bg-dark-700 border-dark-600 text-white text-sm focus:border-primary-500 focus:ring-primary-500 focus:ring-offset-dark-800 px-3 py-2">
-                      </div>
-                      
-                      <div>
-                        <label for="top_p" class="block text-xs font-medium text-white mb-1">Top P</label>
-                        <input type="number" id="top_p" name="ORPHEUS_TOP_P" min="0.1" max="1" step="0.05"
-                               class="block w-full rounded-md bg-dark-700 border-dark-600 text-white text-sm focus:border-primary-500 focus:ring-primary-500 focus:ring-offset-dark-800 px-3 py-2">
-                      </div>
-                      
-                      <div>
-                        <div class="flex justify-between">
-                          <label class="block text-xs font-medium text-white mb-1">Repetition Penalty</label>
-                          <span class="text-xs text-primary-400">Fixed at 1.1</span>
-                        </div>
-                        <div class="bg-dark-700 text-gray-500 border-dark-600 rounded-md px-3 py-2 text-sm">
-                          Value hardcoded to 1.1 for optimal generation quality
-                        </div>
-                      </div>
-                      
-                      <!-- Server settings -->
-                      <div>
-                        <label for="server_host" class="block text-xs font-medium text-white mb-1">Server Host</label>
-                        <input type="text" id="server_host" name="ORPHEUS_HOST" placeholder="0.0.0.0"
-                               class="block w-full rounded-md bg-dark-700 border-dark-600 text-white text-sm focus:border-primary-500 focus:ring-primary-500 focus:ring-offset-dark-800 px-3 py-2">
-                      </div>
-                      
-                      <div>
-                        <label for="server_port" class="block text-xs font-medium text-white mb-1">Server Port</label>
-                        <input type="number" id="server_port" name="ORPHEUS_PORT" min="1024" max="65535" step="1"
-                               class="block w-full rounded-md bg-dark-700 border-dark-600 text-white text-sm focus:border-primary-500 focus:ring-primary-500 focus:ring-offset-dark-800 px-3 py-2">
-                      </div>
-                      
-                      <!-- Save button and restart button -->
-                      <div class="col-span-1 md:col-span-2 mt-4 flex flex-col md:flex-row gap-4">
-                        <button id="save-config-btn" type="button" 
-                                class="btn-primary bg-purple-600 hover:bg-purple-700 active:bg-purple-800 w-full md:w-auto">
-                          Save Configuration
-                        </button>
-                        <button id="restart-server-btn" type="button" 
-                                class="btn-primary bg-red-600 hover:bg-red-700 active:bg-red-800 w-full md:w-auto hidden">
-                          Restart Server
-                        </button>
-                        <p class="text-xs text-purple-300 mt-2 flex-grow">
-                          <span id="config-status" class="hidden"></span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
                 </details>
               </div>
             </div>
@@ -525,396 +445,123 @@
       // Form submission handler
       const ttsForm = document.getElementById('tts-form');
       ttsForm.addEventListener('submit', async function(event) {
-        // Prevent default form submission
         event.preventDefault();
         
-        const streamingMode = document.getElementById('streamingMode').checked;
-        
-        if (streamingMode) {
-          const prompt = document.getElementById('text').value;
-          if (!prompt) {
-            showError('Please enter some text');
-            return;
-          }
-          startGeneration(prompt);
-        } else {
-          // Use regular form submission for non-streaming mode
-          const formData = new FormData(ttsForm);
-          try {
-            const response = await fetch('/v1/audio/speech', {
-              method: 'POST',
-              body: formData
-            });
-            
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const blob = await response.blob();
-            const audioUrl = URL.createObjectURL(blob);
-            const audio = document.getElementById('audio-player-container');
-            audio.innerHTML = `
-              <div class="mt-8 bg-dark-800 shadow-lg rounded-lg overflow-hidden border border-dark-700">
-                <div class="p-6">
-                  <h2 class="text-lg font-medium text-white mb-4">Generated Audio</h2>
-                  
-                  <div class="mb-6">
-                    <div id="waveform" class="w-full h-24"></div>
-                  </div>
-                  
-                  <div class="flex flex-wrap items-center justify-between gap-4">
-                    <div class="flex items-center space-x-4">
-                      <button id="play-btn" class="inline-flex items-center px-4 py-2 border border-primary-700 rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-dark-800 focus:ring-offset-2">
-                        <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                          <path fill-rule="evenodd" d="M10 18a8 8 0 11-16 0 8 8 0 0116 0zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
-                        </svg>
-                        Play
-                      </button>
-                      <a id="download-link" href="${audioUrl}" download class="inline-flex items-center px-4 py-2 border border-dark-600 rounded-md shadow-sm text-sm font-medium text-white bg-dark-700 hover:bg-dark-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-dark-800 focus:ring-offset-2">
-                        <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                          <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
-                        </svg>
-                        Download
-                      </a>
-                    </div>
-                    <div class="text-sm text-purple-300">
-                      Voice: <span id="voice-name" class="font-medium"></span> • 
-                      Duration: <span id="audio-duration" class="font-medium">--:--</span> • 
-                      Generated in: <span id="generation-time" class="font-medium"></span>s
-                    </div>
-                  </div>
-                </div>
-              </div>
-            `;
-            showSuccess('Audio generated successfully!');
-          } catch (error) {
-            console.error('Error:', error);
-            showError('Failed to generate audio: ' + error.message);
-          }
+        const prompt = document.getElementById('text').value;
+        if (!prompt) {
+          updateStatus('Please enter some text');
+          return;
         }
+        
+        startGeneration(prompt);
       });
-      
-      // Add streaming mode toggle to the form
-      const streamingToggle = document.createElement('div');
-      streamingToggle.className = 'mb-4';
-      streamingToggle.innerHTML = `
-        <label class="flex items-center space-x-2">
-          <input type="checkbox" id="streamingMode" class="form-checkbox h-5 w-5 text-blue-600">
-          <span class="text-gray-700">Enable Streaming Mode</span>
-        </label>
-      `;
-      ttsForm.insertBefore(streamingToggle, ttsForm.firstChild);
       
       // Configuration management
       async function loadConfigValues() {
-        try {
-          const response = await fetch('/get_config');
-          if (!response.ok) {
-            throw new Error('Failed to load configuration');
-          }
-          
-          const config = await response.json();
-          
-          // Populate form fields with config values
-          document.querySelectorAll('input[name^="ORPHEUS_"]').forEach(input => {
-            const name = input.name;
-            if (config[name] !== undefined) {
-              input.value = config[name];
-            }
-          });
-          
-          console.log('Configuration loaded successfully');
-        } catch (error) {
-          console.error('Error loading configuration:', error);
-        }
+        // Skip configuration loading since we're connecting to RunPod
+        console.log('Skipping configuration loading - connecting to RunPod');
       }
       
-      // Save configuration
-      async function saveConfiguration() {
-        const configData = {};
-        
-        // Collect values from all configuration inputs
-        document.querySelectorAll('input[name^="ORPHEUS_"]').forEach(input => {
-          configData[input.name] = input.value;
-        });
-        
-        try {
-          const response = await fetch('/save_config', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(configData)
-          });
-          
-          if (!response.ok) {
-            throw new Error('Failed to save configuration');
-          }
-          
-          const result = await response.json();
-          
-          // Show success message
-          const statusElem = document.getElementById('config-status');
-          statusElem.textContent = result.message;
-          statusElem.classList.remove('hidden');
-          statusElem.classList.add('text-green-400');
-          
-          // Hide message after 5 seconds
-          setTimeout(() => {
-            statusElem.classList.add('hidden');
-          }, 5000);
-          
-        } catch (error) {
-          console.error('Error saving configuration:', error);
-          
-          // Show error message
-          const statusElem = document.getElementById('config-status');
-          statusElem.textContent = 'Error saving configuration. Please try again.';
-          statusElem.classList.remove('hidden');
-          statusElem.classList.add('text-red-400');
-          
-          // Hide message after 5 seconds
-          setTimeout(() => {
-            statusElem.classList.add('hidden');
-          }, 5000);
-        }
-      }
-      
-      // Function to restart the server
-      async function restartServer() {
-        const restartBtn = document.getElementById('restart-server-btn');
-        restartBtn.disabled = true;
-        restartBtn.textContent = 'Restarting...';
-        
-        try {
-          const response = await fetch('/restart_server', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (!response.ok) {
-            throw new Error('Failed to restart server');
-          }
-          
-          const result = await response.json();
-          
-          // Show server restarting message and overlay
-          const statusElem = document.getElementById('config-status');
-          statusElem.textContent = result.message;
-          statusElem.classList.remove('hidden');
-          statusElem.classList.add('text-yellow-400');
-          
-          // Show loading overlay with different message
-          const loadingOverlay = document.getElementById('loading-overlay');
-          loadingOverlay.querySelector('p').textContent = 'Server is restarting...';
-          loadingOverlay.classList.remove('hidden');
-          
-          // Poll for server readiness, then do a complete page reload with cache busting
-          function checkServerReady() {
-            console.log("Checking if server is ready...");
-            fetch('/get_config?cache=' + Date.now(), {
-              cache: 'no-store',
-              headers: { 'pragma': 'no-cache' }
-            })
-              .then(response => {
-                if (response.ok) {
-                  console.log("Server is up and running, forcing complete page reload");
-                  // Force a complete reload with cache busting
-                  window.location = window.location.pathname + '?t=' + Date.now();
-                } else {
-                  console.log("Server not ready yet, status: " + response.status);
-                  setTimeout(checkServerReady, 1000);
-                }
-              })
-              .catch(error => {
-                console.log("Server not responding yet, waiting...");
-                setTimeout(checkServerReady, 1000);
-              });
-          }
+      // WebSocket connection
+      let ws = null;
+      let pendingPrompt = null;
 
-          // Start checking after initial delay
-          setTimeout(checkServerReady, 2000);
-          
-        } catch (error) {
-          console.error('Error restarting server:', error);
-          
-          // Show error message
-          const statusElem = document.getElementById('config-status');
-          statusElem.textContent = 'Error restarting server. Please try again.';
-          statusElem.classList.remove('hidden');
-          statusElem.classList.add('text-red-400');
-          
-          // Reset button
-          restartBtn.disabled = false;
-          restartBtn.textContent = 'Restart Server';
-        }
-      }
-      
-      // Add event listeners
-      document.getElementById('save-config-btn').addEventListener('click', function() {
-        saveConfiguration();
-        // Show restart button after saving
-        const restartBtn = document.getElementById('restart-server-btn');
-        restartBtn.classList.remove('hidden');
-      });
-      
-      document.getElementById('restart-server-btn').addEventListener('click', restartServer);
-      
-      // Load configuration values when page loads
-      loadConfigValues();
-
-      // WebSocket handling functions
       function updateStatus(message) {
-        console.log('Status:', message);
         const statusDisplay = document.getElementById('status-display');
         const statusMessage = document.getElementById('status-message');
-        
         statusDisplay.classList.remove('hidden');
         statusMessage.textContent = message;
-        
-        // Hide status after 5 seconds if it's not a connection status
-        if (!message.includes('WebSocket')) {
-          setTimeout(() => {
-            statusDisplay.classList.add('hidden');
-          }, 5000);
-        }
       }
 
       function startGeneration(prompt) {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
-          console.log('WebSocket not ready, queueing prompt');
+          console.log('WebSocket not connected, storing prompt');
           pendingPrompt = prompt;
           return;
         }
 
-        const voice = document.querySelector('input[name="voice"]:checked').value;
-        const speed = document.getElementById('speed').value;
-        const model = document.getElementById('model').value;
-
+        const formData = new FormData(ttsForm);
         const request = {
-          type: 'generate',
-          prompt: prompt,
-          voice: voice,
-          speed: parseFloat(speed),
-          model: model
+          text: prompt,
+          voice: formData.get('voice'),
+          model: formData.get('model'),
+          speed: parseFloat(formData.get('speed'))
         };
 
         ws.send(JSON.stringify(request));
-        isStreaming = true;
-        updateStatus('Starting audio generation...');
+        updateStatus('Generating audio...');
       }
 
-      async function handleAudioChunk(chunk) {
-        if (!audioContext) {
-          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      function handleWebSocketMessage(data) {
+        if (data.type === 'audio_chunk') {
+          handleAudioChunk(data.audio);
+        } else if (data.type === 'error') {
+          updateStatus('Error: ' + data.message);
+        } else if (data.type === 'complete') {
+          updateStatus('Audio generation complete');
+          createAudioPlayer(data);
         }
+      }
+
+      function handleAudioChunk(audioData) {
+        // Convert base64 audio data to blob
+        const binaryString = window.atob(audioData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'audio/wav' });
+        const audioUrl = URL.createObjectURL(blob);
         
-        try {
-          // Convert the chunk to an AudioBuffer
-          const audioBuffer = await audioContext.decodeAudioData(chunk.buffer);
-          
-          // Create a source node
-          const source = audioContext.createBufferSource();
-          source.buffer = audioBuffer;
-          
-          // Connect to the audio context's destination
-          source.connect(audioContext.destination);
-          
-          // Play the chunk
-          source.start(0);
-          
-          // Update status
-          updateStatus('Playing audio chunk...');
-          
-          // Wait for the chunk to finish playing
-          await new Promise(resolve => {
-            source.onended = resolve;
-          });
-        } catch (error) {
-          console.error('Error playing audio chunk:', error);
-          updateStatus('Error playing audio chunk');
+        // Create or update audio player
+        const container = document.getElementById('audio-player-container');
+        if (!container.querySelector('audio')) {
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.src = audioUrl;
+          container.appendChild(audio);
         }
       }
 
-      // WebSocket connection
-      let ws = null;
-      let audioContext = null;
-      let audioQueue = [];
-      let isPlaying = false;
-      let isPaused = false;
-      let pendingPrompt = null;
-      const RUNPOD_WS_URL = 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio';
-      
-      async function connectWebSocket() {
-          if (ws) {
-              ws.close();
+      function connectWebSocket() {
+        const wsUrl = 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio';
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log('WebSocket connected');
+          updateStatus('Connected to RunPod server');
+          if (pendingPrompt) {
+            startGeneration(pendingPrompt);
+            pendingPrompt = null;
           }
-          
-          ws = new WebSocket(RUNPOD_WS_URL);
-          
-          ws.onopen = () => {
-              console.log('WebSocket connected');
-              updateStatus('WebSocket connected');
-              if (pendingPrompt) {
-                  startGeneration(pendingPrompt);
-                  pendingPrompt = null;
-              }
-          };
-          
-          ws.onclose = () => {
-              console.log('WebSocket disconnected');
-              updateStatus('WebSocket disconnected');
-              // Attempt to reconnect after 5 seconds
-              setTimeout(connectWebSocket, 5000);
-          };
-          
-          ws.onerror = (error) => {
-              console.error('WebSocket error:', error);
-              updateStatus('WebSocket error occurred');
-          };
-          
-          ws.onmessage = async (event) => {
-              const data = JSON.parse(event.data);
-              console.log('Received message:', data);
-              
-              switch (data.type) {
-                  case 'start':
-                      updateStatus('Starting audio generation...');
-                      break;
-                  case 'audio_chunk':
-                      if (data.chunk) {
-                          try {
-                              // Convert hex string to Uint8Array
-                              const hexString = data.chunk;
-                              const bytes = new Uint8Array(hexString.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-                              await handleAudioChunk(bytes);
-                          } catch (error) {
-                              console.error('Error processing audio chunk:', error);
-                              updateStatus('Error processing audio chunk');
-                          }
-                      }
-                      break;
-                  case 'generation_complete':
-                      updateStatus('Audio generation complete');
-                      break;
-                  case 'error':
-                      console.error('Server error:', data.error);
-                      updateStatus('Error: ' + data.error);
-                      break;
-              }
-          };
+        };
+        
+        ws.onclose = () => {
+          console.log('WebSocket disconnected');
+          updateStatus('Disconnected from RunPod server');
+          // Attempt to reconnect after 5 seconds
+          setTimeout(connectWebSocket, 5000);
+        };
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          updateStatus('Error connecting to RunPod server');
+        };
+        
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          handleWebSocketMessage(data);
+        };
       }
-      
-      // Connect WebSocket when page loads
+
+      // Initialize WebSocket connection
       connectWebSocket();
       
       // Clean up WebSocket on page unload
       window.addEventListener('beforeunload', () => {
-          if (ws) {
-              ws.close();
-          }
+        if (ws) {
+          ws.close();
+        }
       });
     });
   </script>

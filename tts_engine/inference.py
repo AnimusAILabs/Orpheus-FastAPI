@@ -82,16 +82,16 @@ else:
 
 # Load configuration from environment variables without hardcoded defaults
 # Critical settings - will log errors if missing
-required_settings = ["ORPHEUS_API_URL"]
+required_settings = []  # Remove ORPHEUS_API_URL from required settings
 missing_settings = [s for s in required_settings if s not in os.environ]
 if missing_settings:
     print(f"ERROR: Missing required environment variable(s): {', '.join(missing_settings)}")
     print("Please set them in .env file or environment. See .env.example for defaults.")
 
-# API connection settings
+# API connection settings - make optional
 API_URL = os.environ.get("ORPHEUS_API_URL")
 if not API_URL:
-    print("WARNING: ORPHEUS_API_URL not set. API calls will fail until configured.")
+    print("INFO: Running in local mode without API URL")
 
 HEADERS = {
     "Content-Type": "application/json"
@@ -215,15 +215,14 @@ def format_prompt(prompt: str, voice: str = DEFAULT_VOICE) -> str:
 engine = None
 
 def load_model(model_name="canopylabs/orpheus-tts-0.1-finetune-prod"):
-    global engine
-    if engine is None:
-        try:
-            from orpheus_tts.engine_class import OrpheusModel
-            engine = OrpheusModel(model_name=model_name)
-            print("Successfully initialized OrpheusModel")
-        except Exception as e:
-            print(f"Error initializing model: {e}")
-            raise
+    """Load the Orpheus model for local inference."""
+    try:
+        model = OrpheusModel(model_name)
+        print(f"✅ Model loaded successfully: {model_name}")
+        return model
+    except Exception as e:
+        print(f"⚠️ Error loading model: {e}")
+        raise e
 
 def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: float = 0.4, 
                            top_p: float = 0.9, max_tokens: int = 2000, 
@@ -584,6 +583,27 @@ def generate_speech_from_api(prompt, voice=DEFAULT_VOICE, output_file=None, temp
     
     start_time = time.time()
     
+    # For streaming, use the token generator directly
+    if output_file is None and not use_batching:
+        token_gen = generate_tokens_from_api(
+            prompt=prompt,
+            voice=voice,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            repetition_penalty=REPETITION_PENALTY
+        )
+        
+        # Process tokens and yield audio chunks
+        for token in token_gen:
+            if token:
+                audio_chunk = convert_to_audio([token], 1)
+                if audio_chunk:
+                    yield audio_chunk
+        
+        return
+    
+    # For file output or batching, use the standard approach
     # For shorter text, use the standard non-batched approach
     if not use_batching or len(prompt) < max_batch_chars:
         # Note: we ignore any provided repetition_penalty and always use the hardcoded value

@@ -36,7 +36,14 @@ from pydantic import BaseModel
 import json
 import uuid
 
-from tts_engine import generate_speech_from_api, AVAILABLE_VOICES, DEFAULT_VOICE, generate_tokens_from_api, tokens_decoder
+from tts_engine import (
+    generate_speech_from_api, 
+    AVAILABLE_VOICES, 
+    DEFAULT_VOICE, 
+    generate_tokens_from_api, 
+    tokens_decoder,
+    load_model
+)
 
 # Create FastAPI app
 app = FastAPI(
@@ -44,6 +51,16 @@ app = FastAPI(
     description="High-performance Text-to-Speech server using Orpheus-FASTAPI",
     version="1.0.0"
 )
+
+# Load the model on startup
+@app.on_event("startup")
+async def startup_event():
+    try:
+        load_model()  # Load the model directly
+        print("✅ Model loaded successfully")
+    except Exception as e:
+        print(f"⚠️ Error loading model: {e}")
+        raise e
 
 # We'll use FastAPI's built-in startup complete mechanism
 # The log message "INFO:     Application startup complete." indicates
@@ -110,45 +127,55 @@ async def websocket_endpoint(websocket: WebSocket):
             })
             
             # Extract parameters from request
-            prompt = request_data.get('prompt', '')
+            prompt = request_data.get('text', '')  # Changed from 'prompt' to 'text' to match the form
             voice = request_data.get('voice', DEFAULT_VOICE)
-            temperature = request_data.get('temperature', 0.6)
-            top_p = request_data.get('top_p', 0.9)
-            max_tokens = request_data.get('max_tokens', 8192)
+            model = request_data.get('model', 'orpheus')
+            speed = request_data.get('speed', 1.0)
             
             if not prompt:
                 await websocket.send_json({
                     'type': 'error',
                     'context_id': context_id,
-                    'error': 'Missing prompt'
+                    'error': 'Missing text'
                 })
                 continue
             
-            # Generate tokens and convert to audio chunks
-            token_gen = generate_tokens_from_api(
-                prompt=prompt,
-                voice=voice,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens
-            )
-            
-            # Process tokens and send audio chunks
-            for token in token_gen:
-                if token:
-                    audio_chunk = tokens_decoder(token)
-                    if audio_chunk:
+            # Generate speech directly using the local model
+            try:
+                audio_chunks = generate_speech_from_api(
+                    prompt=prompt,
+                    voice=voice,
+                    output_file=None,  # Don't save to file for streaming
+                    use_batching=False,  # Disable batching for streaming
+                    temperature=TEMPERATURE,
+                    top_p=TOP_P,
+                    max_tokens=MAX_TOKENS
+                )
+                
+                # Send audio chunks
+                for chunk in audio_chunks:
+                    if chunk:
                         await websocket.send_json({
                             'type': 'audio_chunk',
                             'context_id': context_id,
-                            'chunk': audio_chunk.hex()
+                            'audio': chunk.hex()
                         })
-            
-            # Send end signal
-            await websocket.send_json({
-                'type': 'generation_complete',
-                'context_id': context_id
-            })
+                        # Add a small delay to prevent overwhelming the client
+                        await asyncio.sleep(0.01)
+                
+                # Send end signal
+                await websocket.send_json({
+                    'type': 'complete',
+                    'context_id': context_id
+                })
+                
+            except Exception as e:
+                print(f"Error generating speech: {e}")
+                await websocket.send_json({
+                    'type': 'error',
+                    'context_id': context_id,
+                    'error': str(e)
+                })
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -275,12 +302,8 @@ async def speak(request: Request):
 
 # Web UI routes
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    """Redirect to web UI"""
-    return templates.TemplateResponse(
-        "tts.html",
-        {"request": request, "voices": AVAILABLE_VOICES}
-    )
+async def read_root(request: Request):
+    return templates.TemplateResponse("tts.html", {"request": request})
 
 @app.get("/web/", response_class=HTMLResponse)
 async def web_ui(request: Request):
