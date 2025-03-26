@@ -20,7 +20,10 @@ psutil==5.9.0
 
 websockets==12.0
 
+# Orpheus and vLLM dependencies
+vllm==0.7.3      # Specific version required for Orpheus compatibility
 orpheus-speech
+
 # PyTorch - Install separately with CUDA support:
 # On Windows/Linux: 
 #   pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124

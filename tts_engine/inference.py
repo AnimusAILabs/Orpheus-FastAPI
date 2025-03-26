@@ -219,29 +219,10 @@ def load_model(model_name="canopylabs/orpheus-tts-0.1-finetune-prod"):
     global engine
     if engine is None:
         try:
-            # Store the original from_engine_args method
-            original_from_engine_args = AsyncLLMEngine.from_engine_args
-            
-            # Define a patched version that doesn't use disable_log_requests
-            def patched_from_engine_args(engine_args, **kwargs):
-                # Override the max_model_len in engine_args
-                engine_args.max_model_len = 100000
-                engine_args.gpu_memory_utilization = 0.9
-                
-                print(f"Patched from_engine_args called with max_model_len={engine_args.max_model_len}")
-                
-                # Call the original without any extra kwargs
-                return original_from_engine_args(engine_args)
-            
-            # Replace the class method
-            AsyncLLMEngine.from_engine_args = staticmethod(patched_from_engine_args)
-            print("Successfully patched AsyncLLMEngine.from_engine_args")
-            
-            # Initialize the model
+            # Initialize the model directly as shown in the official example
             engine = OrpheusModel(model_name=model_name)
             print(f"✅ Model loaded successfully: {model_name}")
             return engine
-            
         except Exception as e:
             print(f"⚠️ Error loading model: {e}")
             raise e
