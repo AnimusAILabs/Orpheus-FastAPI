@@ -16,6 +16,12 @@ from dotenv import load_dotenv
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from orpheus_tts.engine_class import OrpheusModel
+from orpheus_speech import OrpheusModel as OrpheusSpeechModel
+
+# Set environment variables for vLLM
+os.environ["VLLM_MAX_MODEL_LEN"] = "100000"
+os.environ["VLLM_GPU_MEMORY_UTILIZATION"] = "0.9"
+os.environ["VLLM_DISABLE_LOGGING"] = "1"
 
 # Helper to detect if running in Uvicorn's reloader
 def is_reloader_process():
@@ -213,47 +219,24 @@ def load_model(model_name="canopylabs/orpheus-tts-0.1-finetune-prod"):
     global engine
     if engine is None:
         try:
-            # Store the original from_engine_args method
-            original_from_engine_args = AsyncLLMEngine.from_engine_args
-            
-            # Define a patched version that doesn't use disable_log_requests
-            def patched_from_engine_args(engine_args, **kwargs):
-                # Override the max_model_len in engine_args
-                engine_args.max_model_len = 100000
-                engine_args.gpu_memory_utilization = 0.9
-                
-                print(f"Patched from_engine_args called with max_model_len={engine_args.max_model_len}")
-                
-                # Call the original without any extra kwargs
-                return original_from_engine_args(engine_args)
-            
-            # Replace the class method
-            AsyncLLMEngine.from_engine_args = staticmethod(patched_from_engine_args)
-            print("Successfully patched AsyncLLMEngine.from_engine_args")
-            
-            # Initialize the model
+            from orpheus_speech import OrpheusModel
             engine = OrpheusModel(model_name=model_name)
             print("Successfully initialized OrpheusModel")
-            
         except Exception as e:
             print(f"Error initializing model: {e}")
             raise
 
 def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: float = 0.4, 
                            top_p: float = 0.9, max_tokens: int = 2000, 
-                           repetition_penalty: float = 1.1) -> Generator[str, None, None]:
-    """Generate tokens from text using the local model."""
-    start_time = time.time()
-    formatted_prompt = f"<|audio|>{voice}: {prompt}<|eot_id|>"
-    print(f"Generating speech for: {formatted_prompt}")
-    
+                           repetition_penalty: float = 1.1) -> Generator[bytes, None, None]:
+    """Generate audio chunks from text using Orpheus model."""
     try:
         # Ensure model is loaded
         if engine is None:
             load_model()
         
         # Generate tokens using the model
-        tokens = engine.generate_speech(
+        syn_tokens = engine.generate_speech(
             prompt=prompt,
             voice=voice,
             repetition_penalty=repetition_penalty,
@@ -263,10 +246,10 @@ def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: floa
             top_p=top_p
         )
         
-        # Yield tokens as they are generated
-        for token in tokens:
-            if token:
-                yield token
+        # Yield audio chunks as they are generated
+        for chunk in syn_tokens:
+            if chunk:
+                yield chunk
                 
     except Exception as e:
         print(f"Error generating tokens: {e}")
