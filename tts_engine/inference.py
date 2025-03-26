@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from orpheus_tts.engine_class import OrpheusModel
-from orpheus_speech import OrpheusModel as OrpheusSpeechModel
 
 # Set environment variables for vLLM
 os.environ["VLLM_MAX_MODEL_LEN"] = "100000"
