@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List, Optional
 from dotenv import load_dotenv
 import base64
+import websockets
 
 # Function to ensure .env file exists
 def ensure_env_file_exists():
@@ -134,44 +135,72 @@ async def websocket_endpoint(websocket: WebSocket):
         # Start timing the generation
         start_time = time.time()
         
-        # Receive text data
-        data = await websocket.receive_text()
-        request = json.loads(data)
+        # Initialize text buffer for streaming
+        text_buffer = ""
+        current_voice = "tara"  # Default voice
+        current_model = "orpheus"  # Default model
+        current_speed = 1.0  # Default speed
         
-        # Extract parameters with defaults
-        text = request.get("text", "")
-        voice = request.get("voice", "tara")
-        temperature = request.get("temperature", TEMPERATURE)
-        top_p = request.get("top_p", TOP_P)
-        max_tokens = request.get("max_tokens", MAX_TOKENS)
-        
-        if not text:
-            await websocket.send_json({"error": "No text provided"})
-            return
-            
-        # Generate audio chunks
-        token_gen = generate_tokens_from_api(
-            prompt=text,
-            voice=voice,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens
-        )
-        
-        # Process tokens and send audio chunks
-        async for audio_chunk in tokens_decoder(token_gen):
-            if audio_chunk:
-                # Convert to base64 for WebSocket transmission
-                chunk_b64 = base64.b64encode(audio_chunk).decode('utf-8')
-                await websocket.send_json({
-                    "type": "audio",
-                    "data": chunk_b64
-                })
+        while True:
+            try:
+                # Receive text data
+                data = await websocket.receive_text()
+                request = json.loads(data)
+                
+                # Handle different message types
+                if request.get("type") == "config":
+                    # Update configuration
+                    current_voice = request.get("voice", current_voice)
+                    current_model = request.get("model", current_model)
+                    current_speed = request.get("speed", current_speed)
+                    continue
+                
+                elif request.get("type") == "text":
+                    # Handle streaming text
+                    text_chunk = request.get("text", "")
+                    if not text_chunk:
+                        continue
+                        
+                    text_buffer += text_chunk
+                    
+                    # Generate audio for the new chunk
+                    token_gen = generate_tokens_from_api(
+                        prompt=text_chunk,  # Process just the new chunk
+                        voice=current_voice,
+                        temperature=TEMPERATURE,
+                        top_p=TOP_P,
+                        max_tokens=MAX_TOKENS
+                    )
+                    
+                    # Process tokens and send audio chunks
+                    async for audio_chunk in tokens_decoder(token_gen):
+                        if audio_chunk:
+                            # Convert to base64 for WebSocket transmission
+                            chunk_b64 = base64.b64encode(audio_chunk).decode('utf-8')
+                            await websocket.send_json({
+                                "type": "audio",
+                                "data": chunk_b64
+                            })
+                
+                elif request.get("type") == "complete":
+                    # Handle completion signal
+                    break
+                    
+            except websockets.exceptions.ConnectionClosed:
+                print("WebSocket connection closed by client")
+                break
+            except Exception as e:
+                print(f"WebSocket error: {str(e)}")
+                try:
+                    await websocket.send_json({"error": str(e)})
+                except:
+                    pass
+                break
         
         # Send completion message
         await websocket.send_json({
             "type": "complete",
-            "voice": voice,
+            "voice": current_voice,
             "generation_time": time.time() - start_time
         })
         
