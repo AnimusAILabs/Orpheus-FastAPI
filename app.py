@@ -28,14 +28,15 @@ ensure_env_file_exists()
 # Load environment variables from .env file
 load_dotenv(override=True)
 
-from fastapi import FastAPI, Request, Form, HTTPException, Depends
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi import FastAPI, Request, Form, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import json
+import uuid
 
-from tts_engine import generate_speech_from_api, AVAILABLE_VOICES, DEFAULT_VOICE
+from tts_engine import generate_speech_from_api, AVAILABLE_VOICES, DEFAULT_VOICE, generate_tokens_from_api, tokens_decoder
 
 # Create FastAPI app
 app = FastAPI(
@@ -72,6 +73,121 @@ class APIResponse(BaseModel):
     voice: str
     output_file: str
     generation_time: float
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+manager = ConnectionManager()
+
+# WebSocket endpoint for streaming audio
+@app.websocket("/ws/audio")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            request_data = json.loads(data)
+            
+            # Generate a unique context ID for this audio stream
+            context_id = str(uuid.uuid4())
+            
+            # Send start signal with context ID
+            await websocket.send_json({
+                'type': 'start',
+                'context_id': context_id
+            })
+            
+            # Extract parameters from request
+            prompt = request_data.get('prompt', '')
+            voice = request_data.get('voice', DEFAULT_VOICE)
+            temperature = request_data.get('temperature', 0.6)
+            top_p = request_data.get('top_p', 0.9)
+            max_tokens = request_data.get('max_tokens', 8192)
+            
+            if not prompt:
+                await websocket.send_json({
+                    'type': 'error',
+                    'context_id': context_id,
+                    'error': 'Missing prompt'
+                })
+                continue
+            
+            # Generate tokens and convert to audio chunks
+            token_gen = generate_tokens_from_api(
+                prompt=prompt,
+                voice=voice,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens
+            )
+            
+            # Process tokens and send audio chunks
+            async for audio_chunk in tokens_decoder(token_gen):
+                if audio_chunk:
+                    await websocket.send_json({
+                        'type': 'audio_chunk',
+                        'context_id': context_id,
+                        'chunk': audio_chunk.hex()
+                    })
+            
+            # Send end signal
+            await websocket.send_json({
+                'type': 'generation_complete',
+                'context_id': context_id
+            })
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        await websocket.send_json({
+            'type': 'error',
+            'context_id': context_id if 'context_id' in locals() else None,
+            'error': str(e)
+        })
+        manager.disconnect(websocket)
+
+# Streaming endpoint for HTTP requests
+@app.post("/v1/audio/speech/stream")
+async def stream_speech(request: SpeechRequest):
+    """
+    Stream audio generation using OpenAI-compatible streaming response.
+    """
+    if not request.input:
+        raise HTTPException(status_code=400, detail="Missing input text")
+    
+    async def generate():
+        token_gen = generate_tokens_from_api(
+            prompt=request.input,
+            voice=request.voice,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            max_tokens=MAX_TOKENS
+        )
+        
+        async for audio_chunk in tokens_decoder(token_gen):
+            if audio_chunk:
+                yield audio_chunk
+    
+    return StreamingResponse(
+        generate(),
+        media_type="audio/wav",
+        headers={
+            "Content-Type": "audio/wav",
+            "Transfer-Encoding": "chunked"
+        }
+    )
 
 # OpenAI-compatible API endpoint
 @app.post("/v1/audio/speech")
@@ -308,6 +424,14 @@ async def generate_from_web(
             "generation_time": generation_time,
             "voices": AVAILABLE_VOICES
         }
+    )
+
+@app.get("/stream", response_class=HTMLResponse)
+async def stream_demo(request: Request):
+    """Streaming demo page"""
+    return templates.TemplateResponse(
+        "stream.html",
+        {"request": request, "voices": AVAILABLE_VOICES}
     )
 
 if __name__ == "__main__":
