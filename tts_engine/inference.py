@@ -237,9 +237,12 @@ def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: floa
         if engine is None:
             load_model()
         
+        # Format the prompt with voice and special tokens
+        formatted_prompt = format_prompt(prompt, voice)
+        
         # Generate tokens using the model
         syn_tokens = engine.generate_speech(
-            prompt=prompt,
+            prompt=formatted_prompt,
             voice=voice,
             repetition_penalty=repetition_penalty,
             stop_token_ids=[128258],
@@ -248,26 +251,11 @@ def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: floa
             top_p=top_p
         )
         
-        # Buffer for accumulating audio data
-        audio_buffer = []
-        chunk_size = 16384  # Increased chunk size (about 0.68 seconds at 24kHz)
-        min_chunk_size = 8192  # Minimum chunk size before sending
-        
-        for chunk in syn_tokens:
-            if chunk:
-                audio_buffer.extend(chunk)
-                
-                # Send chunks when we have enough data
-                while len(audio_buffer) >= chunk_size:
-                    chunk_to_send = audio_buffer[:chunk_size]
-                    audio_buffer = audio_buffer[chunk_size:]
-                    
-                    # Convert to bytes and yield
-                    yield bytes(chunk_to_send)
-        
-        # Send any remaining audio data
-        if audio_buffer:
-            yield bytes(audio_buffer)
+        # Process tokens directly without conversion
+        for token in syn_tokens:
+            if token:
+                # The model outputs audio data directly, so we can yield it
+                yield token
                 
     except Exception as e:
         print(f"Error generating tokens: {e}")
