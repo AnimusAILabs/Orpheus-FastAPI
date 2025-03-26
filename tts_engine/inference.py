@@ -206,7 +206,7 @@ def format_prompt(prompt: str, voice: str = DEFAULT_VOICE) -> str:
     special_start = "<|audio|>"  # Using the additional_special_token from config
     special_end = "<|eot_id|>"   # Using the eos_token from config
     
-    return f"{special_start}{prompt}{special_end}"
+    return prompt
 
 # Initialize model as None
 engine = None
