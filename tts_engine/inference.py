@@ -219,7 +219,7 @@ def load_model(model_name="canopylabs/orpheus-tts-0.1-finetune-prod"):
     global engine
     if engine is None:
         try:
-            from orpheus_speech import OrpheusModel
+            from orpheus_tts.engine_class import OrpheusModel
             engine = OrpheusModel(model_name=model_name)
             print("Successfully initialized OrpheusModel")
         except Exception as e:
