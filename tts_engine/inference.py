@@ -248,29 +248,26 @@ def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: floa
             top_p=top_p
         )
         
-        # Buffer for collecting tokens
-        token_buffer = []
+        # Buffer for accumulating audio data
+        audio_buffer = []
+        chunk_size = 16384  # Increased chunk size (about 0.68 seconds at 24kHz)
+        min_chunk_size = 8192  # Minimum chunk size before sending
         
-        # Yield audio chunks as they are generated
         for chunk in syn_tokens:
             if chunk:
-                token_buffer.append(chunk)
+                audio_buffer.extend(chunk)
                 
-                # Process buffer when we have enough tokens (7 is the standard frame size)
-                if len(token_buffer) >= 7:
-                    audio_samples = convert_to_audio(token_buffer, len(token_buffer))
-                    if audio_samples is not None:
-                        yield audio_samples
-                    token_buffer = []
+                # Send chunks when we have enough data
+                while len(audio_buffer) >= chunk_size:
+                    chunk_to_send = audio_buffer[:chunk_size]
+                    audio_buffer = audio_buffer[chunk_size:]
+                    
+                    # Convert to bytes and yield
+                    yield bytes(chunk_to_send)
         
-        # Process any remaining tokens
-        if token_buffer:
-            # Pad the buffer with copies of the last token if needed
-            while len(token_buffer) < 7:
-                token_buffer.append(token_buffer[-1])
-            audio_samples = convert_to_audio(token_buffer, len(token_buffer))
-            if audio_samples is not None:
-                yield audio_samples
+        # Send any remaining audio data
+        if audio_buffer:
+            yield bytes(audio_buffer)
                 
     except Exception as e:
         print(f"Error generating tokens: {e}")
