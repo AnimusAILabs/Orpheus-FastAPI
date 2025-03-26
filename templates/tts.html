@@ -323,8 +323,7 @@
     document.addEventListener('DOMContentLoaded', function() {
       // Global variables
       let wavesurfer;
-      let ws = null;
-      let audioPlayer = null;  // Global audio player instance
+      const activeSessions = new Map();  // Track active sessions by ID
       
       // Character counter
       const textArea = document.getElementById('text');
@@ -362,85 +361,6 @@
         speedValue.textContent = speedSlider.value;
       });
       
-      // No preview buttons in this version
-      
-      // Function to initialize WaveSurfer
-      function initWaveSurfer(audioPath) {
-        // If wavesurfer already exists, destroy it to prevent memory leaks
-        if (wavesurfer) {
-          wavesurfer.destroy();
-        }
-        
-        // Create new wavesurfer instance
-        wavesurfer = WaveSurfer.create({
-          container: '#waveform',
-          waveColor: '#38bdf8',
-          progressColor: '#0284c7',
-          cursorColor: '#0ea5e9',
-          barWidth: 3,
-          barRadius: 3,
-          cursorWidth: 1,
-          height: 80,
-          barGap: 2,
-          responsive: true
-        });
-        
-        wavesurfer.load('/' + audioPath);
-        
-        wavesurfer.on('ready', function() {
-          const duration = wavesurfer.getDuration();
-          const minutes = Math.floor(duration / 60);
-          const seconds = Math.floor(duration % 60);
-          document.getElementById('audio-duration').textContent = 
-            `${minutes}:${seconds < 10 ? '0' + seconds : seconds}`;
-        });
-        
-        // Play button
-        const playBtn = document.getElementById('play-btn');
-        playBtn.addEventListener('click', function() {
-          wavesurfer.playPause();
-          
-          if (wavesurfer.isPlaying()) {
-            playBtn.innerHTML = `
-              <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 001 1h6a1 1 0 001-1V9a1 1 0 00-1-1H7z" clip-rule="evenodd" />
-              </svg>
-              Pause
-            `;
-          } else {
-            playBtn.innerHTML = `
-              <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
-              </svg>
-              Play
-            `;
-          }
-        });
-      }
-      
-      // Function to create and add the audio player to the DOM
-      function createAudioPlayer(response) {
-        const container = document.getElementById('audio-player-container');
-        const template = document.getElementById('audio-player-template');
-        
-        // Clone the template
-        const audioPlayer = template.content.cloneNode(true);
-        
-        // Clear previous player if exists
-        container.innerHTML = '';
-        
-        // Add the new player
-        container.appendChild(audioPlayer);
-        
-        // Set values
-        document.getElementById('voice-name').textContent = response.voice.charAt(0).toUpperCase() + response.voice.slice(1);
-        document.getElementById('generation-time').textContent = response.generation_time;
-        document.getElementById('download-link').href = '/' + response.output_file;
-        
-        // Initialize waveform
-        initWaveSurfer(response.output_file);
-      }
-      
       // Form submission handler
       const ttsForm = document.getElementById('tts-form');
       ttsForm.addEventListener('submit', async function(event) {
@@ -460,7 +380,7 @@
         wsUrl: 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio'  // RunPod WebSocket URL
       };
 
-      function updateStatus(message) {
+      function updateStatus(message, sessionId = '') {
         const statusDisplay = document.getElementById('status-display');
         const statusMessage = document.getElementById('status-message');
         if (statusDisplay && statusMessage) {
@@ -469,29 +389,42 @@
         }
       }
 
-      function startGeneration(text) {
-        // Create a new WebSocket connection for this request
-        if (ws) {
-          ws.close();
-        }
-        
-        // Reset audio player
-        if (audioPlayer) {
-          audioPlayer.reset();
-        }
-        audioPlayer = new AudioStreamPlayer();
-        
-        // Reset audio player UI
+      function createAudioPlayerUI(sessionId) {
         const container = document.getElementById('audio-player-container');
-        container.innerHTML = '';
         const template = document.getElementById('audio-player-template');
-        container.appendChild(template.content.cloneNode(true));
+        const playerElement = template.content.cloneNode(true);
+        
+        // Add session ID to elements
+        const elements = playerElement.querySelectorAll('[id]');
+        elements.forEach(el => {
+          el.id = `${el.id}-${sessionId}`;
+        });
+        
+        // Add the new player
+        container.appendChild(playerElement);
+        return playerElement;
+      }
+
+      function startGeneration(text) {
+        // Generate unique session ID
+        const sessionId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        
+        // Create new audio player UI
+        createAudioPlayerUI(sessionId);
         
         // Create new WebSocket connection
-        ws = new WebSocket(config.wsUrl);
+        const ws = new WebSocket(config.wsUrl);
+        const audioPlayer = new AudioStreamPlayer();
+        
+        // Store session info
+        activeSessions.set(sessionId, {
+          ws,
+          audioPlayer,
+          startTime: Date.now()
+        });
         
         ws.onopen = function() {
-          console.log("Connected to RunPod server");
+          console.log(`Session ${sessionId}: Connected to RunPod server`);
           updateStatus("Connected to server");
           
           // Initialize audio player and send request
@@ -506,41 +439,51 @@
         };
         
         ws.onclose = function() {
-          console.log("WebSocket connection closed");
-          ws = null;  // Clear the WebSocket reference
+          console.log(`Session ${sessionId}: WebSocket connection closed`);
+          activeSessions.delete(sessionId);
         };
         
         ws.onerror = function(error) {
-          console.error("WebSocket error:", error);
+          console.error(`Session ${sessionId}: WebSocket error:`, error);
           updateStatus("Connection error");
-          ws = null;  // Clear the WebSocket reference
+          activeSessions.delete(sessionId);
         };
         
-        ws.onmessage = handleWebSocketMessage;
+        ws.onmessage = function(event) {
+          handleWebSocketMessage(event, sessionId);
+        };
       }
 
-      function handleWebSocketMessage(event) {
+      function handleWebSocketMessage(event, sessionId) {
+        const session = activeSessions.get(sessionId);
+        if (!session) {
+          console.error(`Session ${sessionId} not found`);
+          return;
+        }
+        
         const data = JSON.parse(event.data);
-        console.log('Received WebSocket message:', data);
+        console.log(`Session ${sessionId}: Received WebSocket message:`, data);
         
         if (data.type === 'audio') {
-          if (!audioPlayer) {
-            console.error('No audio player initialized');
-            return;
-          }
-          processAudioData(data.data);
+          processAudioData(data.data, sessionId);
         } else if (data.type === 'complete') {
-          console.log('Audio generation completed');
+          console.log(`Session ${sessionId}: Audio generation completed`);
           updateStatus('Audio generation complete');
-          document.getElementById('voice-name').textContent = data.voice;
-          const duration = Math.floor(audioPlayer.processedDuration);
-          document.getElementById('audio-duration').textContent = 
+          document.getElementById(`voice-name-${sessionId}`).textContent = data.voice;
+          const duration = Math.floor(session.audioPlayer.processedDuration);
+          document.getElementById(`audio-duration-${sessionId}`).textContent = 
             `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}`;
         }
       }
 
-      function processAudioData(base64Data) {
+      function processAudioData(base64Data, sessionId) {
         try {
+          const session = activeSessions.get(sessionId);
+          if (!session) {
+            console.error(`Session ${sessionId} not found`);
+            return;
+          }
+          
           // Convert base64 to Uint8Array
           const binaryString = atob(base64Data);
           const bytes = new Uint8Array(binaryString.length);
@@ -548,24 +491,22 @@
             bytes[i] = binaryString.charCodeAt(i);
           }
           
-          if (!audioPlayer) {
-            console.error('No audio player initialized');
-            return;
-          }
-          
-          audioPlayer.processAudioChunk(bytes);
+          session.audioPlayer.processAudioChunk(bytes);
         } catch (error) {
-          console.error('Error processing audio data:', error);
+          console.error(`Session ${sessionId}: Error processing audio data:`, error);
         }
       }
 
       // Add pause/resume functionality
       document.addEventListener('click', function(e) {
-        if (e.target.closest('#play-pause-btn')) {
-          if (!audioPlayer) return;
+        const playPauseBtn = e.target.closest('[id^="play-pause-btn-"]');
+        if (playPauseBtn) {
+          const sessionId = playPauseBtn.id.split('-').pop();
+          const session = activeSessions.get(sessionId);
+          if (!session) return;
           
-          const isPlaying = audioPlayer.togglePlayPause();
-          e.target.closest('#play-pause-btn').innerHTML = `
+          const isPlaying = session.audioPlayer.togglePlayPause();
+          playPauseBtn.innerHTML = `
             <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="${isPlaying ? 
                 'M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 001 1h6a1 1 0 001-1V9a1 1 0 00-1-1H7z' : 
