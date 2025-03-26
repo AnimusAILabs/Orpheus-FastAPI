@@ -8,6 +8,7 @@ import asyncio
 from datetime import datetime
 from typing import List, Optional
 from dotenv import load_dotenv
+import base64
 
 # Function to ensure .env file exists
 def ensure_env_file_exists():
@@ -116,81 +117,69 @@ manager = ConnectionManager()
 # WebSocket endpoint for streaming audio
 @app.websocket("/ws/audio")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    await websocket.accept()
+    print("INFO:     connection open")
+    
     try:
         while True:
             data = await websocket.receive_text()
-            request_data = json.loads(data)
-            
-            # Generate a unique context ID for this audio stream
-            context_id = str(uuid.uuid4())
-            
-            # Send start signal with context ID
-            await websocket.send_json({
-                'type': 'start',
-                'context_id': context_id
-            })
+            request = json.loads(data)
             
             # Extract parameters from request
-            prompt = request_data.get('text', '')  # Changed from 'prompt' to 'text' to match the form
-            voice = request_data.get('voice', DEFAULT_VOICE)
-            model = request_data.get('model', 'orpheus')
-            speed = request_data.get('speed', 1.0)
+            text = request.get("text", "")
+            voice = request.get("voice", DEFAULT_VOICE)
+            temperature = float(request.get("temperature", TEMPERATURE))
+            top_p = float(request.get("top_p", TOP_P))
+            max_tokens = int(request.get("max_tokens", MAX_TOKENS))
             
-            if not prompt:
+            if not text:
                 await websocket.send_json({
-                    'type': 'error',
-                    'context_id': context_id,
-                    'error': 'Missing text'
+                    "type": "error",
+                    "message": "No text provided"
                 })
                 continue
             
-            # Generate speech directly using the local model
-            try:
-                audio_chunks = generate_speech_from_api(
-                    prompt=prompt,
-                    voice=voice,
-                    output_file=None,  # Don't save to file for streaming
-                    use_batching=False,  # Disable batching for streaming
-                    temperature=TEMPERATURE,
-                    top_p=TOP_P,
-                    max_tokens=MAX_TOKENS
-                )
-                
-                # Send audio chunks
-                for chunk in audio_chunks:
-                    if chunk:
-                        await websocket.send_json({
-                            'type': 'audio_chunk',
-                            'context_id': context_id,
-                            'audio': chunk.hex()
-                        })
-                        # Add a small delay to prevent overwhelming the client
-                        await asyncio.sleep(0.01)
-                
-                # Send end signal
-                await websocket.send_json({
-                    'type': 'complete',
-                    'context_id': context_id
-                })
-                
-            except Exception as e:
-                print(f"Error generating speech: {e}")
-                await websocket.send_json({
-                    'type': 'error',
-                    'context_id': context_id,
-                    'error': str(e)
-                })
+            # Generate audio chunks
+            token_gen = generate_tokens_from_api(
+                prompt=text,
+                voice=voice,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens
+            )
+            
+            start_time = time.time()
+            chunk_count = 0
+            
+            async for audio_chunk in tokens_decoder(token_gen):
+                if audio_chunk:
+                    # Send audio chunk
+                    await websocket.send_json({
+                        "type": "audio_chunk",
+                        "audio": base64.b64encode(audio_chunk).decode('utf-8')
+                    })
+                    chunk_count += 1
+            
+            # Send completion message with metadata
+            generation_time = time.time() - start_time
+            await websocket.send_json({
+                "type": "complete",
+                "voice": voice,
+                "generation_time": round(generation_time, 2),
+                "output_file": f"outputs/{voice}_{int(time.time())}.wav"
+            })
             
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        print("INFO:     connection closed")
     except Exception as e:
-        await websocket.send_json({
-            'type': 'error',
-            'context_id': context_id if 'context_id' in locals() else None,
-            'error': str(e)
-        })
-        manager.disconnect(websocket)
+        print(f"Error in WebSocket connection: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e)
+            })
+        except:
+            pass
 
 # Streaming endpoint for HTTP requests
 @app.post("/v1/audio/speech/stream")
