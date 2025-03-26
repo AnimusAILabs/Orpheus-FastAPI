@@ -14,7 +14,14 @@ from .inference import (
     load_model,
     AVAILABLE_VOICES,
     DEFAULT_VOICE,
-    list_available_voices
+    list_available_voices,
+    # Environment variables and configuration
+    TEMPERATURE,
+    TOP_P,
+    MAX_TOKENS,
+    REPETITION_PENALTY,
+    SAMPLE_RATE,
+    HIGH_END_GPU
 )
 
 __all__ = [
@@ -23,5 +30,13 @@ __all__ = [
     'tokens_decoder',
     'load_model',
     'AVAILABLE_VOICES',
-    'DEFAULT_VOICE'
+    'DEFAULT_VOICE',
+    'list_available_voices',
+    # Environment variables and configuration
+    'TEMPERATURE',
+    'TOP_P',
+    'MAX_TOKENS',
+    'REPETITION_PENALTY',
+    'SAMPLE_RATE',
+    'HIGH_END_GPU'
 ]
