@@ -228,9 +228,9 @@ def load_model(model_name="canopylabs/orpheus-tts-0.1-finetune-prod"):
             raise e
     return engine
 
-def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: float = 0.4, 
-                           top_p: float = 0.9, max_tokens: int = 2000, 
-                           repetition_penalty: float = 1.1) -> Generator[bytes, None, None]:
+def generate_tokens_from_api(prompt: str, voice: str = "tara", temperature: float = TEMPERATURE, 
+                           top_p: float = TOP_P, max_tokens: int = MAX_TOKENS, 
+                           repetition_penalty: float = REPETITION_PENALTY) -> Generator[bytes, None, None]:
     """Generate audio chunks from text using Orpheus model."""
     try:
         # Ensure model is loaded
@@ -265,12 +265,22 @@ def convert_to_audio(multiframe: List[int], count: int) -> Optional[bytes]:
     # Import here to avoid circular imports
     from .speechpipe import convert_to_audio as orpheus_convert_to_audio
     start_time = time.time()
-    result = orpheus_convert_to_audio(multiframe, count)
     
-    if result is not None:
-        perf_monitor.add_audio_chunk()
+    try:
+        result = orpheus_convert_to_audio(multiframe, count)
         
-    return result
+        if result is not None:
+            perf_monitor.add_audio_chunk()
+            return result
+        else:
+            print(f"Warning: convert_to_audio returned None for {len(multiframe)} frames")
+            return None
+            
+    except Exception as e:
+        print(f"Error in convert_to_audio: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 async def tokens_decoder(token_gen) -> Generator[bytes, None, None]:
     """Simplified token decoder with early first-chunk processing for lower latency."""
@@ -287,48 +297,54 @@ async def tokens_decoder(token_gen) -> Generator[bytes, None, None]:
     last_log_time = start_time
     token_count = 0
     
-    async for token_text in token_gen:
-        token = turn_token_into_id(token_text, count)
-        if token is not None and token > 0:
-            # Add to buffer using simple append (reliable method)
-            buffer.append(token)
-            count += 1
-            token_count += 1
-            
-            # Log throughput periodically
-            current_time = time.time()
-            if current_time - last_log_time > 5.0:  # Every 5 seconds
-                elapsed = current_time - start_time
-                if elapsed > 0:
-                    print(f"Token processing rate: {token_count/elapsed:.1f} tokens/second")
-                last_log_time = current_time
-            
-            # Different processing paths based on whether first chunk has been processed
-            if not first_chunk_processed:
-                # For first audio output, process as soon as we have enough tokens for one chunk
-                if count >= min_frames_first:
-                    buffer_to_proc = buffer[-min_frames_first:]
-                    
-                    # Process the first chunk for immediate audio feedback
-                    print(f"Processing first audio chunk with {len(buffer_to_proc)} tokens")
-                    audio_samples = convert_to_audio(buffer_to_proc, count)
-                    if audio_samples is not None:
-                        first_chunk_processed = True  # Mark first chunk as processed
-                        yield audio_samples
-            else:
-                # For subsequent chunks, use standard processing with larger batch
-                if count % process_every == 0 and count >= min_frames_subsequent:
-                    # Use simple slice operation - reliable and correct
-                    buffer_to_proc = buffer[-min_frames_subsequent:]
-                    
-                    # Debug output to help diagnose issues
-                    if count % 28 == 0:
-                        print(f"Processing buffer with {len(buffer_to_proc)} tokens, total collected: {len(buffer)}")
-                    
-                    # Process the tokens
-                    audio_samples = convert_to_audio(buffer_to_proc, count)
-                    if audio_samples is not None:
-                        yield audio_samples
+    try:
+        async for token_text in token_gen:
+            token = turn_token_into_id(token_text, count)
+            if token is not None and token > 0:
+                # Add to buffer using simple append (reliable method)
+                buffer.append(token)
+                count += 1
+                token_count += 1
+                
+                # Log throughput periodically
+                current_time = time.time()
+                if current_time - last_log_time > 5.0:  # Every 5 seconds
+                    elapsed = current_time - start_time
+                    if elapsed > 0:
+                        print(f"Token processing rate: {token_count/elapsed:.1f} tokens/second")
+                    last_log_time = current_time
+                
+                # Different processing paths based on whether first chunk has been processed
+                if not first_chunk_processed:
+                    # For first audio output, process as soon as we have enough tokens for one chunk
+                    if count >= min_frames_first:
+                        buffer_to_proc = buffer[-min_frames_first:]
+                        
+                        # Process the first chunk for immediate audio feedback
+                        print(f"Processing first audio chunk with {len(buffer_to_proc)} tokens")
+                        audio_samples = convert_to_audio(buffer_to_proc, count)
+                        if audio_samples is not None:
+                            first_chunk_processed = True  # Mark first chunk as processed
+                            yield audio_samples
+                else:
+                    # For subsequent chunks, use standard processing with larger batch
+                    if count % process_every == 0 and count >= min_frames_subsequent:
+                        # Use simple slice operation - reliable and correct
+                        buffer_to_proc = buffer[-min_frames_subsequent:]
+                        
+                        # Debug output to help diagnose issues
+                        if count % 28 == 0:
+                            print(f"Processing buffer with {len(buffer_to_proc)} tokens, total collected: {len(buffer)}")
+                        
+                        # Process the tokens
+                        audio_samples = convert_to_audio(buffer_to_proc, count)
+                        if audio_samples is not None:
+                            yield audio_samples
+    except Exception as e:
+        print(f"Error in tokens_decoder: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 def tokens_decoder_sync(syn_token_gen, output_file=None):
     """Optimized synchronous wrapper with parallel processing and efficient file I/O."""

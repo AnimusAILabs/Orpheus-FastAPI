@@ -42,7 +42,12 @@ from tts_engine import (
     DEFAULT_VOICE, 
     generate_tokens_from_api, 
     tokens_decoder,
-    load_model
+    load_model,
+    TEMPERATURE,
+    TOP_P,
+    MAX_TOKENS,
+    REPETITION_PENALTY,
+    SAMPLE_RATE
 )
 
 # Create FastAPI app
