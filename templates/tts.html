@@ -130,6 +130,20 @@
         </div>
         {% endif %}
         
+        <!-- Add status display before the form -->
+        <div id="status-display" class="mb-4 p-4 rounded-md bg-dark-700 text-white text-sm hidden">
+          <div class="flex items-center">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-primary-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="ml-3">
+              <p id="status-message" class="text-sm"></p>
+            </div>
+          </div>
+        </div>
+
         <!-- TTS form -->
         <div class="bg-dark-800 shadow-lg rounded-lg overflow-hidden border border-dark-700">
           <form id="tts-form" class="flex flex-col">
@@ -509,62 +523,87 @@
       }
       
       // Form submission handler
-      const form = document.getElementById('tts-form');
-      form.addEventListener('submit', async function(event) {
+      const ttsForm = document.getElementById('tts-form');
+      ttsForm.addEventListener('submit', async function(event) {
         // Prevent default form submission
         event.preventDefault();
         
-        // Get form data
-        const text = document.getElementById('text').value;
-        const voice = document.querySelector('input[name="voice"]:checked').value;
+        const streamingMode = document.getElementById('streamingMode').checked;
         
-        if (!text.trim()) {
-          alert('Please enter some text to generate speech');
-          return;
-        }
-        
-        // Show loading overlay
-        document.getElementById('loading-overlay').classList.remove('hidden');
-        
-        try {
-          // Make API request to /speak endpoint
-          const response = await fetch('/speak', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              text: text,
-              voice: voice
-            })
-          });
-          
-          if (!response.ok) {
-            throw new Error('Failed to generate speech');
+        if (streamingMode) {
+          const prompt = document.getElementById('text').value;
+          if (!prompt) {
+            showError('Please enter some text');
+            return;
           }
-          
-          const data = await response.json();
-          
-          // Create audio player with response
-          createAudioPlayer(data);
-          
-        } catch (error) {
-          console.error('Error generating speech:', error);
-          alert('An error occurred while generating speech. Please try again.');
-        } finally {
-          // Hide loading overlay
-          document.getElementById('loading-overlay').classList.add('hidden');
+          startGeneration(prompt);
+        } else {
+          // Use regular form submission for non-streaming mode
+          const formData = new FormData(ttsForm);
+          try {
+            const response = await fetch('/v1/audio/speech', {
+              method: 'POST',
+              body: formData
+            });
+            
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const blob = await response.blob();
+            const audioUrl = URL.createObjectURL(blob);
+            const audio = document.getElementById('audio-player-container');
+            audio.innerHTML = `
+              <div class="mt-8 bg-dark-800 shadow-lg rounded-lg overflow-hidden border border-dark-700">
+                <div class="p-6">
+                  <h2 class="text-lg font-medium text-white mb-4">Generated Audio</h2>
+                  
+                  <div class="mb-6">
+                    <div id="waveform" class="w-full h-24"></div>
+                  </div>
+                  
+                  <div class="flex flex-wrap items-center justify-between gap-4">
+                    <div class="flex items-center space-x-4">
+                      <button id="play-btn" class="inline-flex items-center px-4 py-2 border border-primary-700 rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-dark-800 focus:ring-offset-2">
+                        <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M10 18a8 8 0 11-16 0 8 8 0 0116 0zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                        </svg>
+                        Play
+                      </button>
+                      <a id="download-link" href="${audioUrl}" download class="inline-flex items-center px-4 py-2 border border-dark-600 rounded-md shadow-sm text-sm font-medium text-white bg-dark-700 hover:bg-dark-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-dark-800 focus:ring-offset-2">
+                        <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                        Download
+                      </a>
+                    </div>
+                    <div class="text-sm text-purple-300">
+                      Voice: <span id="voice-name" class="font-medium"></span> • 
+                      Duration: <span id="audio-duration" class="font-medium">--:--</span> • 
+                      Generated in: <span id="generation-time" class="font-medium"></span>s
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+            showSuccess('Audio generated successfully!');
+          } catch (error) {
+            console.error('Error:', error);
+            showError('Failed to generate audio: ' + error.message);
+          }
         }
       });
       
-      // Initialize audio player if output file exists from server-side rendering
-      /* {% if output_file %} */
-      createAudioPlayer({
-        voice: "{{ voice if voice else DEFAULT_VOICE }}",
-        output_file: "{{ output_file }}",
-        generation_time: "{{ generation_time }}"
-      });
-      /* {% endif %} */
+      // Add streaming mode toggle to the form
+      const streamingToggle = document.createElement('div');
+      streamingToggle.className = 'mb-4';
+      streamingToggle.innerHTML = `
+        <label class="flex items-center space-x-2">
+          <input type="checkbox" id="streamingMode" class="form-checkbox h-5 w-5 text-blue-600">
+          <span class="text-gray-700">Enable Streaming Mode</span>
+        </label>
+      `;
+      ttsForm.insertBefore(streamingToggle, ttsForm.firstChild);
       
       // Configuration management
       async function loadConfigValues() {
@@ -725,6 +764,123 @@
       
       // Load configuration values when page loads
       loadConfigValues();
+
+      // WebSocket handling functions
+      function updateStatus(message) {
+        console.log('Status:', message);
+        const statusDisplay = document.getElementById('status-display');
+        const statusMessage = document.getElementById('status-message');
+        
+        statusDisplay.classList.remove('hidden');
+        statusMessage.textContent = message;
+        
+        // Hide status after 5 seconds if it's not a connection status
+        if (!message.includes('WebSocket')) {
+          setTimeout(() => {
+            statusDisplay.classList.add('hidden');
+          }, 5000);
+        }
+      }
+
+      function startGeneration(prompt) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          console.log('WebSocket not ready, queueing prompt');
+          pendingPrompt = prompt;
+          return;
+        }
+
+        const voice = document.querySelector('input[name="voice"]:checked').value;
+        const speed = document.getElementById('speed').value;
+        const model = document.getElementById('model').value;
+
+        const request = {
+          type: 'generate',
+          prompt: prompt,
+          voice: voice,
+          speed: parseFloat(speed),
+          model: model
+        };
+
+        ws.send(JSON.stringify(request));
+        isStreaming = true;
+        updateStatus('Starting audio generation...');
+      }
+
+      function handleAudioChunk(audioData) {
+        if (!isStreaming) {
+          // Create new audio context if needed
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const audioBuffer = new Float32Array(audioData);
+          
+          // Create audio source
+          const source = audioContext.createBufferSource();
+          const buffer = audioContext.createBuffer(1, audioBuffer.length, 24000); // 24kHz sample rate
+          buffer.copyToChannel(audioBuffer, 0);
+          source.buffer = buffer;
+          
+          // Connect to destination and play
+          source.connect(audioContext.destination);
+          source.start(0);
+          
+          // Update status
+          updateStatus('Playing audio chunk...');
+        }
+      }
+
+      // WebSocket connection
+      let ws = null;
+      let isStreaming = false;
+      let pendingPrompt = null;
+      const RUNPOD_WS_URL = 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio';
+      
+      function connectWebSocket() {
+          if (ws) {
+              ws.close();
+          }
+          
+          ws = new WebSocket(RUNPOD_WS_URL);
+          
+          ws.onopen = () => {
+              console.log('WebSocket connected');
+              updateStatus('WebSocket connected');
+              if (pendingPrompt) {
+                  startGeneration(pendingPrompt);
+                  pendingPrompt = null;
+              }
+          };
+          
+          ws.onclose = () => {
+              console.log('WebSocket disconnected');
+              updateStatus('WebSocket disconnected');
+              // Attempt to reconnect after 5 seconds
+              setTimeout(connectWebSocket, 5000);
+          };
+          
+          ws.onerror = (error) => {
+              console.error('WebSocket error:', error);
+              updateStatus('WebSocket error occurred');
+          };
+          
+          ws.onmessage = (event) => {
+              const data = JSON.parse(event.data);
+              if (data.type === 'audio') {
+                  handleAudioChunk(data.audio);
+              } else if (data.type === 'error') {
+                  console.error('Server error:', data.error);
+                  updateStatus('Error: ' + data.error);
+              }
+          };
+      }
+      
+      // Connect WebSocket when page loads
+      connectWebSocket();
+      
+      // Clean up WebSocket on page unload
+      window.addEventListener('beforeunload', () => {
+          if (ws) {
+              ws.close();
+          }
+      });
     });
   </script>
 </body>

@@ -134,13 +134,15 @@ async def websocket_endpoint(websocket: WebSocket):
             )
             
             # Process tokens and send audio chunks
-            async for audio_chunk in tokens_decoder(token_gen):
-                if audio_chunk:
-                    await websocket.send_json({
-                        'type': 'audio_chunk',
-                        'context_id': context_id,
-                        'chunk': audio_chunk.hex()
-                    })
+            for token in token_gen:
+                if token:
+                    audio_chunk = tokens_decoder(token)
+                    if audio_chunk:
+                        await websocket.send_json({
+                            'type': 'audio_chunk',
+                            'context_id': context_id,
+                            'chunk': audio_chunk.hex()
+                        })
             
             # Send end signal
             await websocket.send_json({
