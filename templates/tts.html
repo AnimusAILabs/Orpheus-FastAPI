@@ -294,28 +294,24 @@
         <h2 class="text-lg font-medium text-white mb-4">Generated Audio</h2>
         
         <div class="mb-6">
-          <div id="waveform" class="w-full h-24"></div>
+          <!-- Progress bar for audio -->
+          <div class="w-full h-2 bg-dark-700 rounded-full overflow-hidden">
+            <div id="audio-progress" class="h-full bg-primary-500 transition-all duration-300" style="width: 0%"></div>
+          </div>
         </div>
         
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div class="flex items-center space-x-4">
-            <button id="play-btn" class="inline-flex items-center px-4 py-2 border border-primary-700 rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-dark-800 focus:ring-offset-2">
+            <button id="play-pause-btn" class="inline-flex items-center px-4 py-2 border border-primary-700 rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-dark-800 focus:ring-offset-2">
               <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 11-16 0 8 8 0 0116 0zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
               </svg>
               Play
             </button>
-            <a id="download-link" href="#" download class="inline-flex items-center px-4 py-2 border border-dark-600 rounded-md shadow-sm text-sm font-medium text-white bg-dark-700 hover:bg-dark-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-dark-800 focus:ring-offset-2">
-              <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
-              </svg>
-              Download
-            </a>
           </div>
           <div class="text-sm text-purple-300">
             Voice: <span id="voice-name" class="font-medium"></span> • 
-            Duration: <span id="audio-duration" class="font-medium">--:--</span> • 
-            Generated in: <span id="generation-time" class="font-medium"></span>s
+            Duration: <span id="audio-duration" class="font-medium">--:--</span>
           </div>
         </div>
       </div>
@@ -465,91 +461,91 @@
       let ws = null;
       let pendingPrompt = null;
 
-      function updateStatus(message) {
-        const statusDisplay = document.getElementById('status-display');
-        const statusMessage = document.getElementById('status-message');
-        statusDisplay.classList.remove('hidden');
-        statusMessage.textContent = message;
-      }
-
-      function startGeneration(prompt) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          console.log('WebSocket not connected, storing prompt');
-          pendingPrompt = prompt;
-          return;
-        }
-
-        const formData = new FormData(ttsForm);
-        const request = {
-          text: prompt,
-          voice: formData.get('voice'),
-          model: formData.get('model'),
-          speed: parseFloat(formData.get('speed'))
-        };
-
-        ws.send(JSON.stringify(request));
-        updateStatus('Generating audio...');
-      }
-
-      function handleWebSocketMessage(data) {
-        if (data.type === 'audio_chunk') {
-          handleAudioChunk(data.audio);
-        } else if (data.type === 'error') {
-          updateStatus('Error: ' + data.message);
-        } else if (data.type === 'complete') {
-          updateStatus('Audio generation complete');
-          createAudioPlayer(data);
-        }
-      }
-
-      function handleAudioChunk(audioData) {
-        // Convert base64 audio data to blob
-        const binaryString = window.atob(audioData);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(blob);
-        
-        // Create or update audio player
-        const container = document.getElementById('audio-player-container');
-        if (!container.querySelector('audio')) {
-          const audio = document.createElement('audio');
-          audio.controls = true;
-          audio.src = audioUrl;
-          container.appendChild(audio);
-        }
-      }
-
       function connectWebSocket() {
+        if (ws) {
+          ws.close();
+        }
+        
+        // Use the configured WebSocket URL
         ws = new WebSocket(config.wsUrl);
         
-        ws.onopen = () => {
-          console.log('WebSocket connected');
-          updateStatus('Connected to RunPod server');
+        ws.onopen = function() {
+          console.log("Connected to RunPod server");
+          updateStatus("Connected to server");
           if (pendingPrompt) {
             startGeneration(pendingPrompt);
             pendingPrompt = null;
           }
         };
         
-        ws.onclose = () => {
-          console.log('WebSocket disconnected');
-          updateStatus('Disconnected from RunPod server');
-          // Attempt to reconnect after 5 seconds
+        ws.onclose = function() {
+          console.log("Disconnected from RunPod server");
+          updateStatus("Disconnected from server");
+          // Attempt to reconnect after a delay
           setTimeout(connectWebSocket, 5000);
         };
         
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          updateStatus('Error connecting to RunPod server');
+        ws.onerror = function(error) {
+          console.error("WebSocket error:", error);
+          updateStatus("Connection error. Retrying...");
         };
         
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          handleWebSocketMessage(data);
-        };
+        ws.onmessage = handleWebSocketMessage;
+      }
+
+      function updateStatus(message) {
+        const statusDisplay = document.getElementById('status-display');
+        const statusMessage = document.getElementById('status-message');
+        if (statusDisplay && statusMessage) {
+          statusDisplay.classList.remove('hidden');
+          statusMessage.textContent = message;
+        }
+      }
+
+      function startGeneration(text) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          console.log("WebSocket not connected, queuing prompt");
+          pendingPrompt = text;
+          connectWebSocket();
+          return;
+        }
+        
+        // Reset audio player
+        const container = document.getElementById('audio-player-container');
+        container.innerHTML = '';
+        const template = document.getElementById('audio-player-template');
+        container.appendChild(template.content.cloneNode(true));
+        
+        // Initialize audio player
+        const player = new AudioStreamPlayer();
+        
+        // Send request
+        ws.send(JSON.stringify({
+          text: text,
+          voice: document.querySelector('input[name="voice"]:checked').value,
+          temperature: parseFloat(document.getElementById('temperature').value),
+          top_p: parseFloat(document.getElementById('top_p').value),
+          max_tokens: parseInt(document.getElementById('max_tokens').value)
+        }));
+      }
+
+      function handleWebSocketMessage(event) {
+        const data = JSON.parse(event.data);
+        if (data.type === 'audio_chunk') {
+          if (!player.audioContext) {
+            player.init().then(() => {
+              player.isPlaying = true;
+              player.processAudioChunk(data.audio);
+            });
+          } else {
+            player.processAudioChunk(data.audio);
+          }
+        } else if (data.type === 'complete') {
+          updateStatus('Audio generation complete');
+          document.getElementById('voice-name').textContent = data.voice;
+          document.getElementById('audio-duration').textContent = 
+            `${Math.floor(player.processedDuration / 60)}:${Math.floor(player.processedDuration % 60).toString().padStart(2, '0')}`;
+        }
       }
 
       // Initialize WebSocket connection
@@ -561,6 +557,120 @@
           ws.close();
         }
       });
+    });
+
+    class AudioStreamPlayer {
+      constructor() {
+        this.audioContext = null;
+        this.audioQueue = [];
+        this.isPlaying = false;
+        this.nextPlayTime = 0;
+        this.processedDuration = 0;
+        this.bufferSize = 0.25; // 250ms buffer
+        this.sampleRate = 24000;
+      }
+
+      async init() {
+        if (!this.audioContext) {
+          this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: this.sampleRate
+          });
+        }
+      }
+
+      processAudioChunk(chunk) {
+        if (!this.audioContext || !this.isPlaying) return;
+
+        try {
+          // Convert hex string to Float32Array
+          const floatData = this.hexToFloat32Array(chunk);
+          
+          const buffer = this.audioContext.createBuffer(1, floatData.length, this.sampleRate);
+          buffer.copyToChannel(floatData, 0);
+          
+          const source = this.audioContext.createBufferSource();
+          source.buffer = buffer;
+          source.connect(this.audioContext.destination);
+          
+          const currentTime = this.audioContext.currentTime;
+          if (this.nextPlayTime < currentTime) {
+            this.nextPlayTime = currentTime;
+          }
+          
+          source.start(this.nextPlayTime);
+          this.nextPlayTime += buffer.duration;
+          this.processedDuration += buffer.duration;
+          
+          // Update progress bar
+          const progress = document.getElementById('audio-progress');
+          if (progress) {
+            progress.style.width = `${Math.min((this.processedDuration / 30) * 100, 100)}%`;
+          }
+        } catch (error) {
+          console.error('Error processing audio chunk:', error);
+        }
+      }
+
+      hexToFloat32Array(hexString) {
+        const bytes = new Uint8Array(hexString.length / 2);
+        for (let i = 0; i < hexString.length; i += 2) {
+          bytes[i / 2] = parseInt(hexString.substr(i, 2), 16);
+        }
+        
+        // Convert 16-bit PCM to float32
+        const floatData = new Float32Array(bytes.length / 2);
+        const view = new DataView(bytes.buffer);
+        for (let i = 0; i < floatData.length; i++) {
+          floatData[i] = view.getInt16(i * 2, true) / 32768.0;
+        }
+        return floatData;
+      }
+
+      togglePlayPause() {
+        if (this.isPlaying) {
+          this.audioContext.suspend();
+          this.isPlaying = false;
+        } else {
+          this.audioContext.resume();
+          this.isPlaying = true;
+        }
+        return this.isPlaying;
+      }
+
+      reset() {
+        if (this.audioContext) {
+          this.audioContext.suspend();
+          this.audioContext.close();
+          this.audioContext = null;
+        }
+        this.audioQueue = [];
+        this.isPlaying = false;
+        this.nextPlayTime = 0;
+        this.processedDuration = 0;
+      }
+    }
+
+    // Initialize the audio player
+    const audioPlayer = new AudioStreamPlayer();
+
+    // Add play/pause button handler
+    document.addEventListener('click', function(e) {
+      if (e.target.closest('#play-pause-btn')) {
+        const btn = e.target.closest('#play-pause-btn');
+        const isPlaying = audioPlayer.togglePlayPause();
+        
+        btn.innerHTML = isPlaying ? `
+          <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 001 1h6a1 1 0 001-1V9a1 1 0 00-1-1H7z" clip-rule="evenodd" />
+          </svg>
+          Pause
+        ` : `
+          <svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+          </svg>
+          Play
+        `;
+      }
     });
   </script>
 </body>

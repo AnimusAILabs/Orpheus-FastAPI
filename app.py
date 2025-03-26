@@ -33,6 +33,7 @@ from fastapi import FastAPI, Request, Form, HTTPException, Depends, WebSocket, W
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
 import uuid
@@ -56,6 +57,15 @@ app = FastAPI(
     title="Orpheus-FASTAPI",
     description="High-performance Text-to-Speech server using Orpheus-FASTAPI",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 # Load the model on startup
@@ -117,67 +127,66 @@ manager = ConnectionManager()
 # WebSocket endpoint for streaming audio
 @app.websocket("/ws/audio")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    print("INFO:     connection open")
+    await manager.connect(websocket)
+    print("WebSocket connection opened")
     
     try:
-        while True:
-            data = await websocket.receive_text()
-            request = json.loads(data)
+        # Start timing the generation
+        start_time = time.time()
+        
+        # Receive text data
+        data = await websocket.receive_text()
+        request = json.loads(data)
+        
+        # Extract parameters with defaults
+        text = request.get("text", "")
+        voice = request.get("voice", "tara")
+        temperature = request.get("temperature", TEMPERATURE)
+        top_p = request.get("top_p", TOP_P)
+        max_tokens = request.get("max_tokens", MAX_TOKENS)
+        
+        if not text:
+            await websocket.send_json({"error": "No text provided"})
+            return
             
-            # Extract parameters from request
-            text = request.get("text", "")
-            voice = request.get("voice", DEFAULT_VOICE)
-            temperature = float(request.get("temperature", TEMPERATURE))
-            top_p = float(request.get("top_p", TOP_P))
-            max_tokens = int(request.get("max_tokens", MAX_TOKENS))
-            
-            if not text:
+        # Generate audio chunks
+        token_gen = generate_tokens_from_api(
+            prompt=text,
+            voice=voice,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
+        
+        # Process tokens and send audio chunks
+        async for audio_chunk in tokens_decoder(token_gen):
+            if audio_chunk:
+                # Convert to base64 for WebSocket transmission
+                chunk_b64 = base64.b64encode(audio_chunk).decode('utf-8')
                 await websocket.send_json({
-                    "type": "error",
-                    "message": "No text provided"
+                    "type": "audio",
+                    "data": chunk_b64
                 })
-                continue
-            
-            # Generate audio chunks
-            token_gen = generate_tokens_from_api(
-                prompt=text,
-                voice=voice,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens
-            )
-            
-            start_time = time.time()
-            chunk_count = 0
-            
-            async for audio_chunk in tokens_decoder(token_gen):
-                if audio_chunk:
-                    # Send audio chunk
-                    await websocket.send_json({
-                        "type": "audio_chunk",
-                        "audio": base64.b64encode(audio_chunk).decode('utf-8')
-                    })
-                    chunk_count += 1
-            
-            # Send completion message with metadata
-            generation_time = time.time() - start_time
-            await websocket.send_json({
-                "type": "complete",
-                "voice": voice,
-                "generation_time": round(generation_time, 2),
-                "output_file": f"outputs/{voice}_{int(time.time())}.wav"
-            })
-            
+        
+        # Send completion message
+        await websocket.send_json({
+            "type": "complete",
+            "voice": voice,
+            "generation_time": time.time() - start_time
+        })
+        
     except WebSocketDisconnect:
-        print("INFO:     connection closed")
+        print("WebSocket connection closed by client")
     except Exception as e:
-        print(f"Error in WebSocket connection: {e}")
+        print(f"WebSocket error: {str(e)}")
         try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e)
-            })
+            await websocket.send_json({"error": str(e)})
+        except:
+            pass
+    finally:
+        manager.disconnect(websocket)
+        try:
+            await websocket.close()
         except:
             pass
 

@@ -225,6 +225,8 @@ def load_model(model_name="canopylabs/orpheus-tts-0.1-finetune-prod"):
             return engine
         except Exception as e:
             print(f"⚠️ Error loading model: {e}")
+            print("Please ensure you have the correct model files and dependencies installed.")
+            print("You may need to run: pip install -r requirements.txt")
             raise e
     return engine
 
@@ -287,64 +289,25 @@ def convert_to_audio(multiframe: List[int], count: int) -> Optional[bytes]:
         return None
 
 async def tokens_decoder(token_gen) -> Generator[bytes, None, None]:
-    """Simplified token decoder with early first-chunk processing for lower latency."""
-    buffer = []
-    count = 0
-    
-    # Use different thresholds for first chunk vs. subsequent chunks
-    first_chunk_processed = False
-    min_frames_first = 7  # Process after just 7 tokens for first chunk (ultra-low latency)
-    min_frames_subsequent = 28  # Default for reliability after first chunk (4 chunks of 7)
-    process_every = 7  # Process every 7 tokens (standard for Orpheus model)
-    
-    start_time = time.time()
-    last_log_time = start_time
-    token_count = 0
+    """Simplified token decoder that handles raw audio data directly."""
+    buffer = bytearray()
+    chunk_size = 16384  # 16KB chunks for streaming
     
     try:
-        # Handle regular generator instead of async generator
-        for token_text in token_gen:
-            token = turn_token_into_id(token_text, count)
-            if token is not None and token > 0:
-                # Add to buffer using simple append (reliable method)
-                buffer.append(token)
-                count += 1
-                token_count += 1
+        # Process raw audio data directly
+        for audio_chunk in token_gen:
+            if audio_chunk:
+                buffer.extend(audio_chunk)
                 
-                # Log throughput periodically
-                current_time = time.time()
-                if current_time - last_log_time > 5.0:  # Every 5 seconds
-                    elapsed = current_time - start_time
-                    if elapsed > 0:
-                        print(f"Token processing rate: {token_count/elapsed:.1f} tokens/second")
-                    last_log_time = current_time
-                
-                # Different processing paths based on whether first chunk has been processed
-                if not first_chunk_processed:
-                    # For first audio output, process as soon as we have enough tokens for one chunk
-                    if count >= min_frames_first:
-                        buffer_to_proc = buffer[-min_frames_first:]
-                        
-                        # Process the first chunk for immediate audio feedback
-                        print(f"Processing first audio chunk with {len(buffer_to_proc)} tokens")
-                        audio_samples = convert_to_audio(buffer_to_proc, count)
-                        if audio_samples is not None:
-                            first_chunk_processed = True  # Mark first chunk as processed
-                            yield audio_samples
-                else:
-                    # For subsequent chunks, use standard processing with larger batch
-                    if count % process_every == 0 and count >= min_frames_subsequent:
-                        # Use simple slice operation - reliable and correct
-                        buffer_to_proc = buffer[-min_frames_subsequent:]
-                        
-                        # Debug output to help diagnose issues
-                        if count % 28 == 0:
-                            print(f"Processing buffer with {len(buffer_to_proc)} tokens, total collected: {len(buffer)}")
-                        
-                        # Process the tokens
-                        audio_samples = convert_to_audio(buffer_to_proc, count)
-                        if audio_samples is not None:
-                            yield audio_samples
+                # Yield chunks when buffer is large enough
+                while len(buffer) >= chunk_size:
+                    yield bytes(buffer[:chunk_size])
+                    buffer = buffer[chunk_size:]
+        
+        # Yield any remaining data
+        if buffer:
+            yield bytes(buffer)
+            
     except Exception as e:
         print(f"Error in tokens_decoder: {str(e)}")
         import traceback
