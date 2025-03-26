@@ -317,7 +317,8 @@ async def tokens_decoder(token_gen) -> Generator[bytes, None, None]:
     token_count = 0
     
     try:
-        async for token_text in token_gen:
+        # Handle regular generator instead of async generator
+        for token_text in token_gen:
             token = turn_token_into_id(token_text, count)
             if token is not None and token > 0:
                 # Add to buffer using simple append (reliable method)

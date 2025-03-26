@@ -456,12 +456,11 @@
         startGeneration(prompt);
       });
       
-      // Configuration management
-      async function loadConfigValues() {
-        // Skip configuration loading since we're connecting to RunPod
-        console.log('Skipping configuration loading - connecting to RunPod');
-      }
-      
+      // Configuration
+      const config = {
+        wsUrl: 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio'  // RunPod WebSocket URL
+      };
+
       // WebSocket connection
       let ws = null;
       let pendingPrompt = null;
@@ -524,8 +523,7 @@
       }
 
       function connectWebSocket() {
-        const wsUrl = 'wss://vn9tasdamd876m-5005.proxy.runpod.net/ws/audio';
-        ws = new WebSocket(wsUrl);
+        ws = new WebSocket(config.wsUrl);
         
         ws.onopen = () => {
           console.log('WebSocket connected');
